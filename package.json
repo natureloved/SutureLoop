@@ -1,0 +1,27 @@
+{
+  "name": "sutureloop",
+  "version": "1.0.0",
+  "description": "SutureLoop — Self-Healing Operational Agent powered by neatlogs, Entire, and cfo.ai",
+  "main": "src/core/orchestrator.ts",
+  "type": "module",
+  "scripts": {
+    "start": "tsx bin/sutureloop.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "demo:server": "tsx demo/service/server.ts",
+    "demo:heal": "tsx bin/sutureloop.ts auto-heal",
+    "demo:fail": "tsx bin/sutureloop.ts auto-heal --demo-force-fault"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "neatlogs": "1.1.26"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.13.4",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.5"
+  }
+}
