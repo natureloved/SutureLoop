@@ -1,11 +1,18 @@
 import express, { Request, Response } from 'express';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { handleInvoiceBilling, processInvoice } from './routes/billing.js';
 import { TelemetryService } from '../../src/telemetry/neatlogs_client.js';
 import * as neatlogs from 'neatlogs';
 import { config } from '../../src/config/env.js';
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const publicPath = path.resolve(__dirname, '../../public');
+
 const app = express();
 app.use(express.json());
+app.use(express.static(publicPath));
 
 const telemetry = new TelemetryService(config.neatlogsApiKey, config.traceUrlTemplate);
 
