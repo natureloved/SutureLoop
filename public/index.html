@@ -1,0 +1,861 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SutureLoop — Crash in. Verified patch out.</title>
+<meta name="description" content="SutureLoop is an autonomous self-healing operational agent powered by neatlogs, Entire, and cfo.ai that closes the loop from production crash telemetry to a verified patch in under 10 seconds.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#07090a; --bg2:#0b0e10; --panel:#0e1315; --panel2:#12181b;
+  --line:#1c2428; --line2:#2a353b;
+  --text:#e9ede7; --mute:#8d9a94; --dim:#59655f;
+  --crash:#ff5a45; --warn:#ffb547; --ok:#6ef2c0; --ok-d:#2bb98a;
+  --serif:'Instrument Serif',Georgia,serif;
+  --sans:'Inter Tight',system-ui,sans-serif;
+  --mono:'JetBrains Mono',ui-monospace,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{
+  background:var(--bg);color:var(--text);font-family:var(--sans);line-height:1.55;
+  -webkit-font-smoothing:antialiased;overflow-x:hidden;
+}
+body::before{
+  content:"";position:fixed;inset:0;z-index:-2;pointer-events:none;
+  background:
+    radial-gradient(900px 500px at 8% -5%,rgba(255,90,69,.11),transparent 60%),
+    radial-gradient(900px 600px at 100% 10%,rgba(110,242,192,.09),transparent 60%),
+    var(--bg);
+}
+body::after{
+  content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
+  background-image:linear-gradient(var(--line) 1px,transparent 1px),linear-gradient(90deg,var(--line) 1px,transparent 1px);
+  background-size:64px 64px;opacity:.28;
+  -webkit-mask-image:radial-gradient(ellipse at 50% 0%,#000 0%,transparent 70%);
+  mask-image:radial-gradient(ellipse at 50% 0%,#000 0%,transparent 70%);
+}
+a{color:inherit;text-decoration:none}
+.wrap{max-width:1200px;margin:0 auto;padding:0 24px}
+code,.mono{font-family:var(--mono)}
+
+/* NAV */
+nav{position:sticky;top:0;z-index:50;backdrop-filter:blur(14px);background:rgba(7,9,10,.75);border-bottom:1px solid var(--line)}
+.nav-in{display:flex;align-items:center;justify-content:space-between;height:64px}
+.brand{display:flex;align-items:center;gap:10px;font-weight:600;letter-spacing:-.01em;font-size:17px}
+.brand svg{width:28px;height:28px}
+.brand span em{font-family:var(--serif);font-style:italic;font-weight:400;color:var(--ok)}
+.links{display:flex;gap:28px;font-size:14px;color:var(--mute)}
+.links a:hover{color:var(--text)}
+.btn{display:inline-flex;align-items:center;gap:8px;padding:11px 18px;border-radius:999px;font-size:14px;font-weight:600;border:1px solid var(--line2);background:transparent;color:var(--text);cursor:pointer;transition:.2s;font-family:var(--sans)}
+.btn:hover{border-color:var(--ok);color:var(--ok)}
+.btn.primary{background:var(--ok);color:#04130d;border-color:var(--ok)}
+.btn.primary:hover{background:#9bf8d8;color:#04130d;box-shadow:0 0 0 6px rgba(110,242,192,.12)}
+.btn.sm{padding:8px 14px;font-size:13px}
+
+/* HERO */
+.hero{padding:72px 0 56px;display:grid;grid-template-columns:1.05fr 1fr;gap:32px;align-items:center}
+.badge{display:inline-flex;align-items:center;gap:10px;padding:6px 14px 6px 8px;border:1px solid var(--line2);border-radius:999px;font:500 12px var(--mono);color:var(--mute);background:rgba(14,19,21,.7)}
+.badge b{background:var(--ok);color:#04130d;padding:2px 8px;border-radius:999px;font-weight:600}
+h1{font-family:var(--serif);font-weight:400;font-size:clamp(2.8rem,6.2vw,5.6rem);line-height:.98;letter-spacing:-.025em;margin:26px 0 22px}
+h1 em{font-style:italic;color:var(--ok);position:relative;white-space:nowrap}
+h1 em::after{content:"";position:absolute;left:0;right:0;bottom:-.06em;height:6px;
+  background:repeating-linear-gradient(135deg,var(--ok) 0 2px,transparent 2px 7px);opacity:.55}
+h1 .red{color:var(--crash);font-style:italic}
+.lead{font-size:clamp(1rem,1.5vw,1.18rem);color:var(--mute);max-width:560px}
+.lead strong{color:var(--text);font-weight:500}
+.cta{display:flex;gap:12px;flex-wrap:wrap;margin:30px 0 34px}
+.assure{display:flex;gap:22px;flex-wrap:wrap;font:500 12.5px var(--mono);color:var(--mute)}
+.assure span{display:flex;align-items:center;gap:8px}
+.assure svg{width:14px;height:14px;color:var(--ok)}
+
+.ring-wrap{position:relative}
+.ring-wrap svg{width:100%;height:auto;display:block;overflow:visible}
+.ring-base{fill:none;stroke:var(--line2);stroke-width:1.5;stroke-dasharray:2 7}
+.ring-prog{fill:none;stroke:var(--ok);stroke-width:2.5;stroke-linecap:round;stroke-dasharray:880;stroke-dashoffset:880;animation:ringdraw 9s linear infinite;filter:drop-shadow(0 0 6px rgba(110,242,192,.6))}
+@keyframes ringdraw{0%{stroke-dashoffset:880;opacity:1}92%{stroke-dashoffset:0;opacity:1}100%{stroke-dashoffset:0;opacity:0}}
+.rn{fill:var(--panel);stroke:var(--line2);stroke-width:1.5;animation:nodeflash 9s linear infinite;animation-delay:calc(var(--i)*1.5s)}
+@keyframes nodeflash{0%{fill:#103a2c;stroke:var(--ok)}9%{fill:#103a2c;stroke:var(--ok)}16%,100%{fill:var(--panel);stroke:var(--line2)}}
+.rn-t{font:600 11px var(--mono);fill:var(--text);text-anchor:middle;dominant-baseline:central}
+.rl{font:500 12px var(--sans);fill:var(--text)}
+.rl-s{font:400 10.5px var(--mono);fill:var(--dim)}
+.ring-c1{font:400 76px var(--serif);fill:var(--text);text-anchor:middle;letter-spacing:-2px}
+.ring-c2{font:500 11px var(--mono);fill:var(--mute);text-anchor:middle;letter-spacing:.12em;text-transform:uppercase}
+.crashline{stroke:var(--crash);stroke-width:2;stroke-dasharray:5 5;animation:dash 1s linear infinite}
+@keyframes dash{to{stroke-dashoffset:-10}}
+.pulse-r{animation:pr 1.6s ease-out infinite;transform-origin:center;transform-box:fill-box}
+@keyframes pr{0%{transform:scale(.6);opacity:.9}100%{transform:scale(2.4);opacity:0}}
+
+.stitch{height:14px;margin:12px 0;background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='14'%3E%3Cpath d='M0 7h18' stroke='%231c2428' stroke-width='1'/%3E%3Cpath d='M6 2l6 10M12 2L6 12' stroke='%232a353b' stroke-width='1.2' fill='none'/%3E%3C/svg%3E") repeat-x center}
+
+/* SECTION HEADERS */
+section{padding:72px 0}
+.eyebrow{font:500 12px var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--ok);display:flex;align-items:center;gap:10px;margin-bottom:16px}
+.eyebrow::before{content:"";width:28px;height:1px;background:var(--ok)}
+h2{font-family:var(--serif);font-weight:400;font-size:clamp(2.1rem,4.2vw,3.5rem);line-height:1.04;letter-spacing:-.02em;max-width:780px}
+h2 em{color:var(--ok)}
+.sub{color:var(--mute);max-width:620px;margin-top:16px;font-size:1.05rem}
+
+/* THEATER */
+.theater{margin-top:36px;border:1px solid var(--line2);border-radius:20px;background:linear-gradient(180deg,var(--panel),var(--bg2));overflow:hidden;box-shadow:0 40px 100px -40px rgba(0,0,0,.9),0 0 0 1px rgba(110,242,192,.03)}
+.th-head{display:flex;align-items:center;gap:16px;padding:14px 20px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.dots{display:flex;gap:6px}.dots i{width:10px;height:10px;border-radius:50%;background:var(--line2)}
+.inc{font:500 13px var(--mono);color:var(--text)}
+.inc span{color:var(--dim);margin-left:10px}
+.pill{margin-left:auto;display:flex;align-items:center;gap:8px;font:600 11.5px var(--mono);letter-spacing:.08em;text-transform:uppercase;padding:6px 12px;border-radius:999px;border:1px solid var(--line2);color:var(--mute);transition:.3s}
+.pill i{width:7px;height:7px;border-radius:50%;background:currentColor}
+.pill.crash{color:var(--crash);border-color:rgba(255,90,69,.4);background:rgba(255,90,69,.08)}
+.pill.crash i{animation:blink 1s infinite}
+.pill.heal{color:var(--warn);border-color:rgba(255,181,71,.4);background:rgba(255,181,71,.07)}
+.pill.heal i{animation:blink .8s infinite}
+.pill.ok{color:var(--ok);border-color:rgba(110,242,192,.45);background:rgba(110,242,192,.08)}
+@keyframes blink{50%{opacity:.25}}
+
+.th-clock{display:grid;grid-template-columns:auto 1fr auto;gap:28px;align-items:center;padding:20px 24px;border-bottom:1px solid var(--line);background:rgba(0,0,0,.18)}
+.clock{font:500 clamp(2.2rem,5vw,3.4rem)/1 var(--mono);letter-spacing:-.03em;font-variant-numeric:tabular-nums}
+.clock small{font-size:.4em;color:var(--mute);margin-left:4px}
+.budget .bar{position:relative;height:8px;border-radius:99px;background:var(--line);overflow:visible}
+.budget .bar i{position:absolute;left:0;top:0;bottom:0;border-radius:99px;background:linear-gradient(90deg,var(--crash),var(--warn) 40%,var(--ok));width:0;box-shadow:0 0 14px rgba(110,242,192,.4)}
+.budget .lab{display:flex;justify-content:space-between;font:500 11px var(--mono);color:var(--dim);margin-top:8px}
+.ctrl{display:flex;gap:10px;align-items:center}
+.seg{display:flex;border:1px solid var(--line2);border-radius:999px;padding:3px}
+.seg button{background:none;border:0;color:var(--mute);font:600 11.5px var(--mono);padding:6px 11px;border-radius:999px;cursor:pointer}
+.seg button.on{background:var(--line2);color:var(--text)}
+
+.th-body{display:grid;grid-template-columns:300px 1fr;min-height:470px}
+.stages{list-style:none;position:relative;padding:18px 14px 18px 22px;border-right:1px solid var(--line);display:flex;flex-direction:column;justify-content:space-between}
+.thread{position:absolute;left:41px;top:8.33%;bottom:8.33%;width:2px;background:repeating-linear-gradient(180deg,var(--line2) 0 5px,transparent 5px 9px)}
+.thread i{position:absolute;left:0;right:0;top:0;height:0;background:var(--ok);box-shadow:0 0 10px var(--ok)}
+.stages li{position:relative;z-index:1}
+.st{width:100%;display:flex;gap:14px;align-items:flex-start;text-align:left;background:none;border:1px solid transparent;border-radius:12px;padding:10px 10px;cursor:pointer;color:var(--mute);font-family:var(--sans);transition:.2s}
+.st:hover{background:rgba(255,255,255,.025)}
+.st .n{flex:none;width:38px;height:38px;border-radius:50%;display:grid;place-items:center;background:var(--bg);border:1.5px solid var(--line2);font:600 12px var(--mono);color:var(--dim);transition:.3s}
+.st .tx b{display:block;font-weight:600;font-size:14px;color:var(--mute);line-height:1.25;transition:.3s}
+.st .tx span{font-size:12px;color:var(--dim);display:block;margin-top:2px;line-height:1.35}
+.st .tm{margin-left:auto;font:500 11px var(--mono);color:var(--dim);padding-top:3px}
+.st.active{background:rgba(110,242,192,.05);border-color:rgba(110,242,192,.25)}
+.st.active .n{border-color:var(--ok);color:var(--ok);box-shadow:0 0 0 5px rgba(110,242,192,.1)}
+.st.active .tx b{color:var(--text)}
+.st.done .n{background:var(--ok);border-color:var(--ok);color:#04130d}
+.st.done .tx b{color:var(--text)}
+
+.panel{padding:24px 28px;display:flex;flex-direction:column;min-width:0}
+.ph{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:18px;flex-wrap:wrap}
+.ph .k{font:500 11.5px var(--mono);color:var(--ok);letter-spacing:.12em;text-transform:uppercase}
+.ph h3{font-family:var(--serif);font-weight:400;font-size:1.9rem;letter-spacing:-.01em;line-height:1.1;margin-top:4px}
+.ph p{color:var(--mute);font-size:14px;max-width:560px;margin-top:6px}
+.ph .dur{font:500 12px var(--mono);color:var(--mute);border:1px solid var(--line2);padding:5px 10px;border-radius:8px}
+.pb{flex:1;min-width:0}
+.two{display:grid;grid-template-columns:1.5fr 1fr;gap:18px}
+.rv{opacity:0;transform:translateY(6px);transition:opacity .4s,transform .4s}
+.rv.on{opacity:1;transform:none}
+svg .rv{transform:none}
+.sw{display:none}.sw.on{display:block}
+
+.term{background:#080b0c;border:1px solid var(--line);border-radius:12px;padding:14px 16px;font:12px/1.85 var(--mono);color:#b9c4be;overflow-x:auto}
+.ln{white-space:pre}
+.ts{color:var(--dim);margin-right:10px}
+.lv{display:inline-block;min-width:44px;margin-right:10px;font-weight:600}
+.lv.info{color:#6aa8ff}.lv.warn{color:var(--warn)}.lv.fatal{color:var(--crash)}.lv.k8s{color:#c58cff}
+.fatal-row{background:rgba(255,90,69,.09);margin:0 -16px;padding:0 16px;border-left:2px solid var(--crash);color:#ffc2b9}
+.cards{display:grid;gap:10px;align-content:start}
+.mc{border:1px solid var(--line);border-radius:12px;padding:12px 14px;background:var(--panel2)}
+.mc small{display:block;font:500 10.5px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--dim)}
+.mc b{display:block;font:500 22px var(--mono);letter-spacing:-.02em;margin-top:2px}
+.mc b.g{color:var(--ok)}.mc b.r{color:var(--crash)}.mc b.a{color:var(--warn)}
+.mc em{font-style:normal;font-size:12px;color:var(--mute)}
+.emit{margin-top:16px;font:500 12px var(--mono);color:var(--mute);display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.emit code{background:rgba(110,242,192,.08);border:1px solid rgba(110,242,192,.25);color:var(--ok);padding:3px 9px;border-radius:6px}
+
+.graph{background:#080b0c;border:1px solid var(--line);border-radius:12px;padding:6px;position:relative}
+.graph svg{width:100%;height:auto;display:block}
+.g-edge{stroke:#2a353b;stroke-width:1.2}
+.g-edge.hot{stroke:var(--warn);stroke-width:1.6}
+.g-edge.root{stroke:var(--crash);stroke-width:1.8}
+.g-edge.test{stroke:var(--ok);stroke-dasharray:4 4}
+.g-dim{fill:#2a353b}
+.g-n{stroke-width:1.8}
+.g-n.crash{fill:#3a1410;stroke:var(--crash)}
+.g-n.imp{fill:#3a2a0e;stroke:var(--warn)}
+.g-n.test{fill:#0f3326;stroke:var(--ok)}
+.g-l{font:500 11px var(--mono);fill:#cfd8d2;text-anchor:middle}
+.g-ring{fill:rgba(255,181,71,.035);stroke:var(--warn);stroke-width:1.3;stroke-dasharray:6 6;animation:dash 1.2s linear infinite}
+.legend{display:flex;gap:16px;flex-wrap:wrap;font:500 11px var(--mono);color:var(--mute);padding:8px 10px 4px}
+.legend span{display:flex;align-items:center;gap:6px}
+.legend i{width:9px;height:9px;border-radius:50%;display:inline-block}
+
+.files{display:grid;gap:10px}
+.file{display:flex;align-items:center;gap:14px;border:1px solid var(--line);background:var(--panel2);border-radius:12px;padding:12px 14px;font:12.5px var(--mono)}
+.file svg{width:18px;height:18px;color:var(--ok);flex:none}
+.file .h{margin-left:auto;color:var(--dim)}
+.file .p{color:var(--text)}
+.ckpt{margin-top:14px;border:1px dashed rgba(110,242,192,.4);border-radius:12px;padding:14px 16px;background:rgba(110,242,192,.04);display:flex;gap:20px;flex-wrap:wrap;font:12px var(--mono);color:var(--mute)}
+.ckpt b{color:var(--ok);display:block;font-size:14px;font-weight:600}
+.pips{display:flex;gap:5px;margin-top:5px}.pips i{width:20px;height:6px;border-radius:3px;background:var(--ok)}.pips i.u{background:var(--line2)}
+
+.tl{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px}
+.chip{font:500 11.5px var(--mono);padding:5px 10px;border-radius:999px;border:1px solid var(--line2);color:var(--mute);display:flex;gap:6px;align-items:center}
+.chip.bad{color:var(--crash);border-color:rgba(255,90,69,.45);background:rgba(255,90,69,.07)}
+.chip.good{color:var(--ok);border-color:rgba(110,242,192,.45);background:rgba(110,242,192,.07)}
+.chip.neu{color:var(--warn);border-color:rgba(255,181,71,.4);background:rgba(255,181,71,.06)}
+.diff{background:#080b0c;border:1px solid var(--line);border-radius:12px;overflow:hidden;font:12.5px/1.75 var(--mono)}
+.diff .fh{padding:8px 14px;border-bottom:1px solid var(--line);color:var(--mute);display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;font-size:12px}
+.d{display:flex;padding:0 14px;white-space:pre;overflow-x:auto;color:#9aa6a0}
+.d i{width:20px;font-style:normal;color:var(--dim);flex:none}
+.d.add{background:rgba(110,242,192,.09);color:#c3f9e3}.d.add i{color:var(--ok)}
+.d.del{background:rgba(255,90,69,.1);color:#ffbcb2}.d.del i{color:var(--crash)}
+.d.hunk{color:#6aa8ff;background:rgba(106,168,255,.06)}
+.testline{padding:9px 14px;border-top:1px solid var(--line);font-size:12px;display:flex;gap:8px;align-items:center}
+.testline.f{color:var(--crash);background:rgba(255,90,69,.06)}
+.testline.p{color:var(--ok);background:rgba(110,242,192,.06)}
+
+.cmp{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.tr{border:1px solid var(--line);border-radius:12px;background:#080b0c;padding:12px 14px}
+.tr h4{font:600 11px var(--mono);letter-spacing:.1em;text-transform:uppercase;display:flex;justify-content:space-between;margin-bottom:10px}
+.tr.b h4{color:var(--crash)}.tr.a h4{color:var(--ok)}
+.sp{display:grid;grid-template-columns:140px 1fr;gap:10px;align-items:center;font:11.5px var(--mono);color:#aab6b0;padding:4px 0}
+.sp .t{height:12px;background:var(--line);border-radius:3px;position:relative}
+.sp .t b{position:absolute;top:0;bottom:0;border-radius:3px;background:#3b4a52}
+.sp .t b.r{background:var(--crash)}.sp .t b.g{background:var(--ok-d)}.sp .t b.h{background:repeating-linear-gradient(135deg,rgba(255,90,69,.5) 0 3px,transparent 3px 6px)}
+.sp span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.verdicts{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:14px}
+
+.ledger{border:1px solid var(--line);border-radius:12px;background:var(--panel2);padding:6px 16px;font:12.5px var(--mono)}
+.lrow{display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px dashed var(--line2);color:var(--mute);gap:10px}
+.lrow:last-child{border:0;color:var(--text);font-weight:600;font-size:14px}
+.lrow b{color:var(--text);font-weight:500}
+.lrow:last-child b{color:var(--ok)}
+.vs{display:grid;gap:12px;align-content:start}
+.vsb{border:1px solid var(--line);border-radius:12px;padding:12px 14px;background:var(--panel2)}
+.vsb .top{display:flex;justify-content:space-between;font:500 12px var(--mono);color:var(--mute);margin-bottom:8px}
+.vsb .top b{color:var(--text)}
+.vsb .bar{height:10px;border-radius:99px;background:var(--line);overflow:hidden}
+.vsb .bar i{display:block;height:100%;border-radius:99px}
+.big{font:400 3rem/1 var(--serif);color:var(--ok);letter-spacing:-.02em}
+.big small{font:500 11px var(--mono);color:var(--mute);letter-spacing:.1em;text-transform:uppercase;display:block;margin-top:6px}
+
+.th-foot{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:14px 24px;border-top:1px solid var(--line);font:500 12.5px var(--mono);color:var(--mute);background:rgba(0,0,0,.2);flex-wrap:wrap}
+.th-foot b{color:var(--ok);font-weight:600}
+
+/* ARCHITECTURE */
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:44px}
+.card{position:relative;border:1px solid var(--line);border-radius:18px;padding:26px 24px 22px;background:linear-gradient(180deg,var(--panel),var(--bg2));transition:.3s;overflow:hidden}
+.card::before{content:"";position:absolute;inset:0;background:radial-gradient(300px 140px at 0 0,rgba(110,242,192,.09),transparent 70%);opacity:0;transition:.3s}
+.card:hover{border-color:rgba(110,242,192,.4);transform:translateY(-3px)}
+.card:hover::before{opacity:1}
+.card .no{font:400 3.2rem/1 var(--serif);color:var(--line2);position:absolute;right:20px;top:14px;transition:.3s}
+.card:hover .no{color:rgba(110,242,192,.35)}
+.card .ic{width:42px;height:42px;border-radius:12px;display:grid;place-items:center;background:rgba(110,242,192,.07);border:1px solid rgba(110,242,192,.25);color:var(--ok);margin-bottom:20px}
+.card .ic svg{width:21px;height:21px}
+.card h3{font-size:1.1rem;font-weight:600;letter-spacing:-.01em;margin-bottom:8px;position:relative}
+.card p{color:var(--mute);font-size:14.5px;position:relative}
+.card .em{margin-top:18px;font:500 11.5px var(--mono);color:var(--dim);display:flex;align-items:center;gap:8px;position:relative}
+.card .em code{color:var(--ok)}
+.closer{margin-top:16px;border:1px solid rgba(110,242,192,.3);border-radius:18px;padding:22px 26px;background:linear-gradient(90deg,rgba(110,242,192,.07),transparent);display:flex;gap:20px;align-items:center;flex-wrap:wrap}
+.closer svg{width:34px;height:34px;color:var(--ok);flex:none}
+.closer p{color:var(--mute);flex:1;min-width:240px}
+.closer p b{color:var(--text);font-weight:600}
+
+/* STATS */
+.stats{display:grid;grid-template-columns:repeat(4,1fr);border:1px solid var(--line2);border-radius:20px;overflow:hidden;background:var(--panel)}
+.stat{padding:34px 28px;border-right:1px solid var(--line)}
+.stat:last-child{border:0}
+.stat .v{font:400 clamp(2.6rem,4.4vw,4rem)/1 var(--serif);letter-spacing:-.03em}
+.stat .v span{color:var(--ok)}
+.stat p{margin-top:10px;color:var(--mute);font-size:14px}
+.stat small{display:block;margin-top:8px;font:500 11px var(--mono);color:var(--dim);letter-spacing:.08em;text-transform:uppercase}
+
+.guar{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:20px}
+.g{border-top:1px solid var(--line2);padding-top:20px}
+.g h4{font-family:var(--serif);font-weight:400;font-size:1.7rem;letter-spacing:-.01em;margin-bottom:8px}
+.g h4 i{color:var(--ok)}
+.g p{color:var(--mute);font-size:14.5px}
+
+/* CTA */
+.final{position:relative;border:1px solid var(--line2);border-radius:28px;padding:64px 40px;text-align:center;overflow:hidden;background:radial-gradient(600px 260px at 50% 0%,rgba(110,242,192,.13),transparent 70%),var(--panel)}
+.final h2{margin:0 auto}
+.final .sub{margin:16px auto 30px}
+.final .cta{justify-content:center;margin:0}
+.track{display:inline-block;margin-top:30px;font:500 12px var(--mono);color:var(--mute);letter-spacing:.04em}
+.track b{color:var(--ok);font-weight:500}
+footer{border-top:1px solid var(--line);padding:28px 0 40px;color:var(--dim);font:500 12px var(--mono)}
+.foot-in{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap}
+
+/* RESPONSIVE */
+@media(max-width:1020px){
+  .hero{grid-template-columns:1fr;padding-top:48px}
+  .ring-wrap{max-width:640px;margin:0 auto}
+  .grid3{grid-template-columns:1fr 1fr}
+  .stats{grid-template-columns:1fr 1fr}
+  .stat:nth-child(2){border-right:0}
+  .stat:nth-child(-n+2){border-bottom:1px solid var(--line)}
+}
+@media(max-width:860px){
+  .th-body{grid-template-columns:1fr}
+  .stages{flex-direction:row;overflow-x:auto;border-right:0;border-bottom:1px solid var(--line);padding:12px;gap:8px;justify-content:flex-start}
+  .stages li{flex:none;width:230px}
+  .thread{display:none}
+  .st .tm{display:none}
+  .th-clock{grid-template-columns:1fr auto;gap:16px}
+  .budget{grid-column:1/-1;order:3}
+  .two,.cmp{grid-template-columns:1fr}
+  .links{display:none}
+  .guar{grid-template-columns:1fr}
+}
+@media(max-width:600px){
+  .wrap{padding:0 16px}
+  section{padding:52px 0}
+  .grid3{grid-template-columns:1fr}
+  .verdicts{grid-template-columns:1fr}
+  .panel{padding:18px 16px}
+  .ph h3{font-size:1.6rem}
+  .final{padding:44px 20px}
+  .stat{padding:24px 18px}
+  .sp{grid-template-columns:96px 1fr}
+  .ctrl .seg{display:none}
+}
+@media(prefers-reduced-motion:reduce){
+  *{animation:none!important;transition:none!important}
+  .ring-prog{stroke-dashoffset:0}
+}
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="wrap nav-in">
+    <a href="#" class="brand" aria-label="SutureLoop home">
+      <svg viewBox="0 0 32 32" fill="none" aria-hidden="true">
+        <path d="M16 4a12 12 0 1 1-8.5 3.5" stroke="#6ef2c0" stroke-width="2.2" stroke-linecap="round"/>
+        <path d="M7.5 7.5L4 4M7.5 7.5L4 11" stroke="#6ef2c0" stroke-width="2.2" stroke-linecap="round"/>
+        <path d="M12 3l-1 6M17 3l-1 6M22 3.8l-1 6" stroke="#ff5a45" stroke-width="1.6" stroke-linecap="round" opacity="0"/>
+        <path d="M13 12l6 8M19 12l-6 8" stroke="#e9ede7" stroke-width="1.8" stroke-linecap="round"/>
+      </svg>
+      <span>Suture<em>Loop</em></span>
+    </a>
+    <div class="links">
+      <a href="#theater">Live incident</a>
+      <a href="#architecture">Architecture</a>
+      <a href="#proof">Guarantees</a>
+      <a href="https://github.com/natureloved/SutureLoop" target="_blank" rel="noopener">GitHub</a>
+    </div>
+    <a href="#theater" class="btn primary sm">Watch it heal</a>
+  </div>
+</nav>
+
+<main>
+<!-- HERO -->
+<header class="wrap hero">
+  <div>
+    <div class="badge"><b>neatHack 2026</b> Build an agent that works (literally)</div>
+    <h1>Crash in.<br><em>Verified patch</em> out.<br><span class="red">Under ten seconds.</span></h1>
+    <p class="lead">SutureLoop is an autonomous operational self-healing agent powered by <strong>neatlogs</strong>, <strong>Entire</strong>, and <strong>cfo.ai</strong>. It intercepts production microservice crashes, <strong>fences the AST blast radius</strong>, synthesizes regression-tested patches behind a <strong>225ms bounded rollback</strong>, and <strong>audits the unit economics</strong> of every fix.</p>
+    <div class="cta">
+      <a class="btn primary" href="#theater">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg> Replay live incident
+      </a>
+      <a class="btn" href="#architecture">Explore the loop →</a>
+    </div>
+    <div class="assure">
+      <span><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 8.5l3 3 7-7"/></svg>No speculative modifications</span>
+      <span><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 8.5l3 3 7-7"/></svg>Bounded 225ms rollback</span>
+      <span><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 8.5l3 3 7-7"/></svg>Audited by cfo.ai</span>
+    </div>
+  </div>
+
+  <div class="ring-wrap" aria-label="Diagram: the six-stage SutureLoop closed loop">
+    <svg viewBox="0 0 640 470" role="img">
+      <circle class="ring-base" cx="320" cy="235" r="140"/>
+      <circle class="ring-prog" cx="320" cy="235" r="140" transform="rotate(-90 320 235)"/>
+      <circle r="5.5" fill="#fff" style="filter:drop-shadow(0 0 8px #6ef2c0)">
+        <animateMotion dur="9s" repeatCount="indefinite" path="M320 95 A140 140 0 0 1 320 375 A140 140 0 0 1 320 95"/>
+      </circle>
+
+      <!-- crash in / patch out -->
+      <line class="crashline" x1="70" y1="95" x2="296" y2="95"/>
+      <text x="70" y="80" class="rl-s" fill="#ff5a45" style="fill:#ff5a45">✕ PROD CRASH</text>
+      <circle cx="70" cy="95" r="5" fill="#ff5a45"/><circle class="pulse-r" cx="70" cy="95" r="5" fill="#ff5a45"/>
+      <line x1="346" y1="95" x2="570" y2="95" stroke="#6ef2c0" stroke-width="2"/>
+      <path d="M562 89l8 6-8 6" stroke="#6ef2c0" stroke-width="2" fill="none"/>
+      <text x="570" y="80" class="rl-s" style="fill:#6ef2c0" text-anchor="end">✓ VERIFIED PATCH</text>
+
+      <!-- stitch ticks closing the wound -->
+      <g stroke="#e9ede7" stroke-width="1.5" stroke-linecap="round" opacity=".55">
+        <path d="M303 88l0 14M337 88l0 14" />
+      </g>
+
+      <!-- nodes -->
+      <g>
+        <circle class="rn" style="--i:0" cx="320" cy="95" r="16"/><text class="rn-t" x="320" y="95">1</text>
+        <circle class="rn" style="--i:1" cx="441" cy="165" r="16"/><text class="rn-t" x="441" y="165">2</text>
+        <circle class="rn" style="--i:2" cx="441" cy="305" r="16"/><text class="rn-t" x="441" y="305">3</text>
+        <circle class="rn" style="--i:3" cx="320" cy="375" r="16"/><text class="rn-t" x="320" y="375">4</text>
+        <circle class="rn" style="--i:4" cx="199" cy="305" r="16"/><text class="rn-t" x="199" y="305">5</text>
+        <circle class="rn" style="--i:5" cx="199" cy="165" r="16"/><text class="rn-t" x="199" y="165">6</text>
+      </g>
+      <!-- labels -->
+      <g>
+        <text class="rl" x="320" y="130" text-anchor="middle">Telemetry Ingestion</text>
+        <text class="rl" x="465" y="162">Blast Radius</text><text class="rl-s" x="465" y="177">Entire AST code graph</text>
+        <text class="rl" x="465" y="302">Atomic Checkpoint</text><text class="rl-s" x="465" y="317">225ms bounded rollback</text>
+        <text class="rl" x="320" y="412" text-anchor="middle">Patch Synthesis &amp; Vitest</text>
+        <text class="rl" x="175" y="302" text-anchor="end">Trace Evaluation</text><text class="rl-s" x="175" y="317" text-anchor="end">neatlogs baseline vs patched</text>
+        <text class="rl" x="175" y="162" text-anchor="end">Unit Economics</text><text class="rl-s" x="175" y="177" text-anchor="end">cfo.ai cost audit ($0.0011)</text>
+      </g>
+      <text class="ring-c1" x="320" y="248">&lt;10s</text>
+      <text class="ring-c2" x="320" y="276">crash → verified</text>
+    </svg>
+  </div>
+</header>
+
+<div class="wrap"><div class="stitch"></div></div>
+
+<!-- THEATER -->
+<section id="theater">
+  <div class="wrap">
+    <div class="eyebrow">Live incident theater</div>
+    <h2>Watch the loop <em>close</em> in real time.</h2>
+    <p class="sub">A real-world null property crash in <code>billing-service</code> goes from fatal neatlogs telemetry to an Entire-fenced, Vitest-verified patch in 8.6 seconds. Click any stage to inspect the produced artifacts.</p>
+
+    <div class="theater" id="theaterBox">
+      <div class="th-head">
+        <div class="dots"><i></i><i></i><i></i></div>
+        <div class="inc">INC-8644<span>billing-service · demo/service/routes/billing.ts:20</span></div>
+        <div class="pill" id="pill"><i></i><span id="pillText">Awaiting crash</span></div>
+      </div>
+
+      <div class="th-clock">
+        <div class="clock" id="clock">0.00<small>s</small></div>
+        <div class="budget" aria-label="Time budget, 10 seconds">
+          <div class="bar"><i id="barFill"></i></div>
+          <div class="lab"><span>crash detected</span><span>10s budget</span></div>
+        </div>
+        <div class="ctrl">
+          <div class="seg" id="speed" role="group" aria-label="Playback speed">
+            <button data-s="1" class="on">1×</button><button data-s="0.5">0.5×</button>
+          </div>
+          <button class="btn sm" id="replay">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg>
+            Replay
+          </button>
+        </div>
+      </div>
+
+      <div class="th-body">
+        <ol class="stages" id="stages"><div class="thread"><i id="threadFill"></i></div></ol>
+        <div class="panel" id="panel" aria-live="polite"></div>
+      </div>
+
+      <div class="th-foot">
+        <span id="footMsg">Standing by for production telemetry…</span>
+        <span id="footRight" class="mono"></span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ARCHITECTURE -->
+<section id="architecture" style="padding-top:24px">
+  <div class="wrap">
+    <div class="eyebrow">Architecture</div>
+    <h2>Six stages. <em>One</em> closed loop.</h2>
+    <p class="sub">Every stage emits a typed artifact the next one consumes. Nothing is edited outside the fence, nothing ships without a trace-level diff.</p>
+
+    <div class="grid3">
+      <article class="card"><span class="no">01</span>
+        <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg></div>
+        <h3>Telemetry Ingestion (neatlogs)</h3>
+        <p>Streams runtime exception spans via neatlogs v1.1.26. Clusters duplicate fatal traces into a single crash signature and extracts root file and line coordinates.</p>
+        <div class="em">emits <code>CrashSignature#9ac1e4f7</code></div></article>
+      <article class="card"><span class="no">02</span>
+        <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="8" r="2.5"/><circle cx="12" cy="18" r="2.5"/><path d="M8 7l8 1M7 8l4 8M17 10l-4 6"/></svg></div>
+        <h3>Blast Radius Analysis (Entire)</h3>
+        <p>Builds a code graph from the AST with Entire v0.11.4, walks callers and callees of <code>processInvoice()</code>, and fences the minimal set of files the agent may touch.</p>
+        <div class="em">emits <code>ScopeFence[1 file, 3 callers]</code></div></article>
+      <article class="card"><span class="no">03</span>
+        <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg></div>
+        <h3>Atomic Checkpoint</h3>
+        <p>Snapshots the affected demo scope before a single byte changes. Rollback is hash-verified, time-boxed to 30s, and restores clean state in 225ms.</p>
+        <div class="em">emits <code>CheckpointId cp_1791730154393</code></div></article>
+      <article class="card"><span class="no">04</span>
+        <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 7l-5 5 5 5M16 7l5 5-5 5M14 4l-4 16"/></svg></div>
+        <h3>Adaptive Patch Synthesis &amp; Vitest</h3>
+        <p>Synthesizes safe null navigation inside the fence. When Attempt 1 fails the reproduction test, it executes an atomic rollback in 225ms and retries with failure context.</p>
+        <div class="em">emits <code>VerifiedDiff#2 (1 rollback)</code></div></article>
+      <article class="card"><span class="no">05</span>
+        <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h10M4 12h16M4 18h7"/><circle cx="18" cy="6" r="2"/><circle cx="15" cy="18" r="2"/></svg></div>
+        <h3>Comparative Trace Evaluation</h3>
+        <p>Replays the failing request against baseline and patched builds in neatlogs, diffing the spans. Asserts error rate drops 1 → 0 with zero unexpected AST mutations.</p>
+        <div class="em">emits <code>TraceVerdict: PASS</code></div></article>
+      <article class="card"><span class="no">06</span>
+        <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18M16.5 7.5c-.8-1.2-2.4-2-4.5-2-2.6 0-4.2 1.2-4.2 3 0 4 8.9 2 8.9 6.2 0 1.800-1.800 3.300-4.700 3.300-2.200 0-4-.8-5-2.300"/></svg></div>
+        <h3>Unit Economics Engine (cfo.ai)</h3>
+        <p>Meters tokens, compute, and MTTR savings ($93.75 per fix at $125/hr) against token spend ($0.0011), proving a 99.99% compute gross margin for CFO governance.</p>
+        <div class="em">emits <code>CostLedger#INC-8644</code></div></article>
+    </div>
+
+    <div class="closer">
+      <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M27 16a11 11 0 1 1-4-8.5"/><path d="M27 4v6h-6"/></svg>
+      <p><b>The loop stays closed.</b> After promotion, telemetry keeps watching the patched symbol. If the same signature re-appears, the incident re-opens with the previous attempt attached as context.</p>
+    </div>
+  </div>
+</section>
+
+<!-- PROOF -->
+<section id="proof" style="padding-top:24px">
+  <div class="wrap">
+    <div class="eyebrow">Operating guarantees</div>
+    <h2>An agent you can <em>leave on call</em>.</h2>
+    <div style="height:36px"></div>
+    <div class="stats">
+      <div class="stat"><div class="v"><span>&lt;</span><span data-count="10" data-dec="0">10</span><span>s</span></div><p>Crash telemetry to verified patch</p><small>measured 8.6s runtime</small></div>
+      <div class="stat"><div class="v"><span data-count="0.46" data-dec="2">0.46</span><span>%</span></div><p>Of the code graph touched per fix</p><small>3 of 653 AST relations</small></div>
+      <div class="stat"><div class="v"><span data-count="3" data-dec="0">3</span></div><p>Maximum attempts before agent rolls back &amp; escalates</p><small>225ms atomic rollback</small></div>
+      <div class="stat"><div class="v"><span>$</span><span data-count="0.0011" data-dec="4">0.0011</span></div><p>Metered LLM cost of remediation</p><small>$93.75 MTTR saved</small></div>
+    </div>
+
+    <div class="guar">
+      <div class="g"><h4>No <i>speculation.</i></h4><p>The agent only edits symbols implicated by the crash signature and Entire's AST code graph. If the evidence is thin, it escalates instead of guessing.</p></div>
+      <div class="g"><h4>Bounded <i>rollback.</i></h4><p>Every attempt runs on top of a hash-verified checkpoint with a retry budget and a TTL. Failure always returns to a clean state in 225ms.</p></div>
+      <div class="g"><h4>Audited <i>economics.</i></h4><p>Each fix ships with a cfo.ai cost ledger, measuring reliability ROI in dollars and seconds (>99% gross margin on compute).</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- FINAL CTA -->
+<section style="padding-top:24px">
+  <div class="wrap">
+    <div class="final">
+      <div class="eyebrow" style="justify-content:center">neatHack AI Agent Hackathon 2026</div>
+      <h2>Stop paging humans for <em>null checks.</em></h2>
+      <p class="sub">Give production a nervous system that heals itself with neatlogs &amp; Entire, and an accountant from cfo.ai that tells you exactly what it cost.</p>
+      <div class="cta">
+        <a class="btn primary" href="#theater">Replay the incident</a>
+        <a class="btn" href="#architecture">Read the architecture</a>
+      </div>
+      <div class="track">Track: <b>Build an agent that works (literally)</b></div>
+    </div>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="wrap foot-in">
+    <span>© 2026 SutureLoop · autonomous operational self-healing</span>
+    <span>Built for neatHack AI Agent Hackathon 2026 · Powered by neatlogs, Entire &amp; cfo.ai</span>
+  </div>
+</footer>
+
+<script>
+(function(){
+  const $=s=>document.querySelector(s);
+  const ICON={
+    lock:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>'
+  };
+
+  /* ---------- STAGE DEFINITIONS ---------- */
+  function graphSVG(){
+    const nodes=[
+      ['root',300,170,'processInvoice()','crash',.12,'b'],
+      ['A',160,90,'handleInvoiceBilling()','imp',.3,'b'],
+      ['B',180,225,'POST /invoice (server.ts)','imp',.36,'b'],
+      ['C',440,100,'InvoiceRequest','imp',.42,'b'],
+      ['D',450,240,'CartSvc.sync()','imp',.48,'b'],
+      ['E',300,50,'Invoice.render()','imp',.54,'t'],
+      ['F',300,290,'billing.test.ts (Vitest)','test',.72,'b']
+    ];
+    const grey=[[60,40],[70,160],[55,280],[540,50],[550,170],[545,290],[470,20],[110,320],[400,310],[210,20]];
+    const gEdges=[[60,40,70,160],[70,160,55,280],[540,50,550,170],[550,170,545,290],[470,20,540,50],[70,160,160,90],[550,170,450,240],[545,290,450,240],[55,280,180,225],[60,40,160,90],[110,320,180,225],[400,310,450,240],[210,20,160,90]];
+    const hot=[[160,90],[180,225],[440,100],[450,240],[300,50]];
+    let s='<svg viewBox="0 -12 600 364" role="img" aria-label="Entire AST Code Graph with blast radius highlighted">';
+    gEdges.forEach(e=>s+=`<line class="g-edge" x1="${e[0]}" y1="${e[1]}" x2="${e[2]}" y2="${e[3]}"/>`);
+    grey.forEach(g=>s+=`<circle class="g-dim" cx="${g[0]}" cy="${g[1]}" r="5"/>`);
+    s+=`<circle class="g-ring rv" data-at=".62" cx="300" cy="170" r="178"/>`;
+    hot.forEach((h,i)=>s+=`<line class="g-edge hot rv" data-at="${.22+i*.06}" x1="300" y1="170" x2="${h[0]}" y2="${h[1]}"/>`);
+    s+=`<line class="g-edge test rv" data-at=".7" x1="300" y1="170" x2="300" y2="290"/>`;
+    nodes.forEach(n=>{
+      const r=n[4]==='crash'?15:11;
+      s+=`<g class="rv" data-at="${n[5]}">`;
+      if(n[4]==='crash') s+=`<circle cx="${n[1]}" cy="${n[2]}" r="15" fill="none" stroke="#ff5a45" opacity=".5"><animate attributeName="r" values="15;32" dur="1.6s" repeatCount="indefinite"/><animate attributeName="opacity" values=".6;0" dur="1.6s" repeatCount="indefinite"/></circle>`;
+      s+=`<circle class="g-n ${n[4]}" cx="${n[1]}" cy="${n[2]}" r="${r}"/>`;
+      const ly=n[6]==='t'?n[2]-18:n[2]+r+15;
+      s+=`<text class="g-l" x="${n[1]}" y="${ly}">${n[3]}</text></g>`;
+    });
+    return s+'</svg>';
+  }
+
+  const STAGES=[
+    {name:'Telemetry Ingestion',short:'Cluster fatals into one signature',dur:.9,
+     desc:'Runtime exception spans stream via neatlogs v1.1.26. Duplicate fatals collapse into a single crash signature with source coordinates.',
+     msg:'Ingesting neatlogs stream · clustering fatal signals…',
+     body:()=>`<div class="two">
+       <div class="term">
+         <div class="ln rv" data-at=".05"><span class="ts">14:02:07.114</span><span class="lv info">INFO</span>POST /api/billing/invoice 200 118ms</div>
+         <div class="ln rv" data-at=".12"><span class="ts">14:02:07.260</span><span class="lv info">INFO</span>invoice.payload items=3 customer_id="cust_982"</div>
+         <div class="ln rv" data-at=".22"><span class="ts">14:02:07.402</span><span class="lv warn">WARN</span>invoice.customer.address missing in payload</div>
+         <div class="ln fatal-row rv" data-at=".34"><span class="ts">14:02:07.409</span><span class="lv fatal">FATAL</span>TypeError: Cannot read properties of undefined (reading 'address')</div>
+         <div class="ln fatal-row rv" data-at=".42"><span class="ts">             </span><span class="lv"></span>  at processInvoice (demo/service/routes/billing.ts:20:31)</div>
+         <div class="ln fatal-row rv" data-at=".48"><span class="ts">             </span><span class="lv"></span>  at handleInvoiceBilling (demo/service/routes/billing.ts:26:18)</div>
+         <div class="ln fatal-row rv" data-at=".52"><span class="ts">             </span><span class="lv"></span>  at /api/billing/invoice (demo/service/server.ts:30:19)</div>
+         <div class="ln rv" data-at=".6"><span class="ts">14:02:07.411</span><span class="lv k8s">K8S</span>CrashLoopBackOff billing-svc-7f9c restarts=3</div>
+         <div class="ln rv" data-at=".7"><span class="ts">14:02:07.412</span><span class="lv info">INFO</span>neatlogs: 214 identical fatals → 1 signature</div>
+       </div>
+       <div class="cards">
+         <div class="mc rv" data-at=".3"><small>Events ingested</small><b>12,408<em> /s</em></b></div>
+         <div class="mc rv" data-at=".5"><small>Fatal signatures</small><b class="r">1</b></div>
+         <div class="mc rv" data-at=".7"><small>Noise discarded</small><b class="g">99.97%</b></div>
+       </div></div>
+       <div class="emit rv" data-at=".85">emits → <code>CrashSignature#9ac1e4f7</code> <span>TypeError · billing.ts:20</span></div>`},
+
+    {name:'Blast Radius Analysis',short:'Fence the Entire AST impact zone',dur:1.3,
+     desc:'The Entire AST code graph is walked from processInvoice(). Discovers callers and isolates the minimal scope fence in 1,011ms.',
+     msg:'Querying Entire code graph from processInvoice() · fencing minimal scope…',
+     body:()=>`<div class="two">
+       <div class="graph">${graphSVG()}
+         <div class="legend"><span><i style="background:#ff5a45"></i>fault origin</span><span><i style="background:#ffb547"></i>in blast radius</span><span><i style="background:#6ef2c0"></i>selected test</span><span><i style="background:#2a353b"></i>untouched</span></div>
+       </div>
+       <div class="cards">
+         <div class="mc rv" data-at=".25"><small>AST Relations (Entire)</small><b>653</b></div>
+         <div class="mc rv" data-at=".5"><small>Inside blast radius</small><b class="a">3 callers <em>· 0.46%</em></b></div>
+         <div class="mc rv" data-at=".7"><small>Selected test suite</small><b class="g">billing.test.ts</b></div>
+         <div class="mc rv" data-at=".85"><small>Files fenced</small><b>1 file</b></div>
+       </div></div>
+       <div class="emit rv" data-at=".9">emits → <code>ScopeFence[1 file, 3 callers, 1 test]</code></div>`},
+
+    {name:'Atomic Checkpoint',short:'Snapshot scope, arm rollback',dur:.6,
+     desc:'The fenced files are snapshotted and hash-locked with Entire & Git before any code modification is attempted.',
+     msg:'Locking demo sandbox · arming bounded 225ms rollback…',
+     body:()=>`<div class="files">
+       <div class="file rv" data-at=".1">${ICON.lock}<span class="p">demo/service/routes/billing.ts</span><span class="h">sha 4be19c7 · 1.2 KB</span></div>
+       <div class="file rv" data-at=".3">${ICON.lock}<span class="p">demo/service/server.ts</span><span class="h">sha a03f5d2 · 2.8 KB</span></div>
+       <div class="file rv" data-at=".5">${ICON.lock}<span class="p">demo/tests/billing.test.ts</span><span class="h">sha 77d0e18 · 0.6 KB</span></div>
+     </div>
+     <div class="ckpt rv" data-at=".7">
+       <div>checkpoint<b>cp_1791730154393_baseline-pre-heal</b></div>
+       <div>retry budget<b>3 attempts</b><div class="pips"><i></i><i></i><i></i></div></div>
+       <div>rollback TTL<b>30s</b></div>
+       <div>measured restore<b>225ms</b></div>
+     </div>
+     <div class="emit rv" data-at=".9">emits → <code>CheckpointId cp_1791730154393</code></div>`},
+
+    {name:'Adaptive Patch Synthesis & Recovery',short:'Patch, test, rewind, retry',dur:3.6,
+     desc:'A minimal patch is generated inside the fence. A failing regression test triggers an atomic rollback in 225ms and retries with failure context.',
+     msg:'Synthesizing patch inside fence · running Vitest regression suite…',
+     body:()=>`<div class="tl">
+         <span class="chip neu rv" data-at=".04">① Attempt 1 · naive synthesize</span>
+         <span class="chip bad rv" data-at=".4">✕ 0/1 · regression test failed (Cannot read 'city')</span>
+         <span class="chip neu rv" data-at=".5">↺ atomic rollback in 225ms (cp_baseline)</span>
+         <span class="chip neu rv" data-at=".58">② Attempt 2 · Entire AST &amp; trace context</span>
+         <span class="chip good rv" data-at=".88">✓ 1/1 suite (14/14 tests) pass</span>
+       </div>
+       <div class="diff">
+         <div class="fh"><span>demo/service/routes/billing.ts</span><span>@@ -18,6 +18,6 @@ processInvoice()</span></div>
+         <div class="sw" data-at=".04" data-until=".52">
+           <div class="d"><i> </i>export function processInvoice(invoice: any): string {</div>
+           <div class="d del"><i>-</i>  return invoice.customer.address.city;</div>
+           <div class="d add"><i>+</i>  return invoice.customer ? invoice.customer.address.city : "Unknown";</div>
+           <div class="d"><i> </i>}</div>
+           <div class="testline f"><span>✕</span> billing.test.ts › empty address throws (expected "Unknown City", got TypeError)</div>
+         </div>
+         <div class="sw" data-at=".58">
+           <div class="d"><i> </i>export function processInvoice(invoice: any): string {</div>
+           <div class="d del"><i>-</i>  return invoice.customer.address.city;</div>
+           <div class="d add"><i>+</i>  return invoice?.customer?.address?.city ?? "Unknown City";</div>
+           <div class="d"><i> </i>}</div>
+           <div class="testline p rv" data-at=".88"><span>✓</span> 1/1 suite (14/14 tests) pass · +1 −1 lines · 586ms Vitest</div>
+         </div>
+       </div>
+       <div class="emit rv" data-at=".92">emits → <code>VerifiedDiff#2</code> <span>1 of 3 attempts rolled back in 225ms</span></div>`},
+
+    {name:'Comparative Trace Evaluation',short:'Diff baseline vs patched spans',dur:1.3,
+     desc:'The failing request is replayed against baseline vs patched builds in neatlogs. Error rate drops from 100% to 0% with zero span drift.',
+     msg:'Replaying POST /api/billing/invoice against baseline and patched builds…',
+     body:()=>`<div class="cmp">
+       <div class="tr b rv" data-at=".05"><h4><span>Baseline · crashed</span><span>312 ms</span></h4>
+         <div class="sp"><span>POST /invoice</span><div class="t"><b class="r" style="left:0;width:100%"></b></div></div>
+         <div class="sp"><span>handleBilling</span><div class="t"><b style="left:0;width:7%"></b></div></div>
+         <div class="sp"><span>processInvoice ✕</span><div class="t"><b class="r" style="left:7%;width:3%"></b></div></div>
+         <div class="sp"><span>500 TypeError</span><div class="t"><b class="h" style="left:10%;width:90%"></b></div></div>
+       </div>
+       <div class="tr a rv" data-at=".3"><h4><span>Patched · verified</span><span>94 ms</span></h4>
+         <div class="sp"><span>POST /invoice</span><div class="t"><b class="g" style="left:0;width:30%"></b></div></div>
+         <div class="sp"><span>handleBilling</span><div class="t"><b style="left:0;width:7%"></b></div></div>
+         <div class="sp"><span>processInvoice ✓</span><div class="t"><b class="g" style="left:7%;width:2%"></b></div></div>
+         <div class="sp"><span>200 OK Response</span><div class="t"><b style="left:9%;width:20%"></b></div></div>
+       </div>
+     </div>
+     <div class="verdicts">
+       <div class="mc rv" data-at=".55"><small>Error rate delta</small><b class="g">1 → 0 (100% fixed)</b></div>
+       <div class="mc rv" data-at=".7"><small>Vitest suite</small><b class="g">100% PASS</b></div>
+       <div class="mc rv" data-at=".82"><small>Span drift</small><b>1 symbol</b><em>processInvoice only</em></div>
+     </div>
+     <div class="emit rv" data-at=".92">emits → <code>TraceVerdict: PASS (neatlogs verified)</code></div>`},
+
+    {name:'Unit Economics Engine',short:'Audit the cost of this fix',dur:.7,
+     desc:'Every remediation is metered by token and compute spend, then compared against human MTTR triage costs ($125/hr) for cfo.ai governance.',
+     msg:'Auditing token consumption & calculating ROI for cfo.ai…',
+     body:()=>`<div class="two">
+       <div class="ledger">
+         <div class="lrow rv" data-at=".08"><span>neatlogs telemetry ingestion &amp; dedupe</span><b>$0.00004</b></div>
+         <div class="lrow rv" data-at=".22"><span>Entire AST code graph walk</span><b>$0.00004</b></div>
+         <div class="lrow rv" data-at=".36"><span>Patch synthesis (2 attempts, 1,090 tokens)</span><b>$0.00080</b></div>
+         <div class="lrow rv" data-at=".5"><span>Vitest verification &amp; trace replay</span><b>$0.00022</b></div>
+         <div class="lrow rv" data-at=".66"><span>Total remediation cost (measured)</span><b>$0.0011</b></div>
+       </div>
+       <div class="vs">
+         <div class="vsb rv" data-at=".5"><div class="top"><span>SutureLoop</span><b>8.6 s · $0.0011</b></div><div class="bar"><i style="width:1.5%;background:var(--ok)"></i></div></div>
+         <div class="vsb rv" data-at=".62"><div class="top"><span>Human on-call triage (est.)</span><b>45 min · $93.75</b></div><div class="bar"><i style="width:100%;background:var(--crash)"></i></div></div>
+         <div class="big rv" data-at=".8">≈85,000×<small>lower cost per incident (99.99% margin)</small></div>
+       </div></div>
+       <div class="emit rv" data-at=".9">emits → <code>CostLedger#INC-8644</code> <span>attached to patch PR &amp; cfo.ai audit</span></div>`}
+  ];
+
+  let acc=0;
+  STAGES.forEach(s=>{s.start=acc;acc+=s.dur;s.end=acc;});
+  const TOTAL=acc, BUDGET=10, N=STAGES.length;
+
+  /* ---------- BUILD STAGE LIST ---------- */
+  const stagesEl=$('#stages');
+  STAGES.forEach((s,i)=>{
+    const li=document.createElement('li');
+    li.innerHTML=`<button class="st" data-i="${i}" aria-label="Inspect stage ${i+1}: ${s.name.replace(/&/g,'and')}">
+      <span class="n">${i+1}</span>
+      <span class="tx"><b>${s.name.replace('&','&amp;')}</b><span>${s.short}</span></span>
+      <span class="tm">${s.dur.toFixed(1)}s</span></button>`;
+    stagesEl.appendChild(li);
+  });
+  const stBtns=[...stagesEl.querySelectorAll('.st')];
+  stBtns.forEach(b=>b.addEventListener('click',()=>seek(+b.dataset.i)));
+
+  /* ---------- STATE ---------- */
+  const panel=$('#panel'),clock=$('#clock'),bar=$('#barFill'),thread=$('#threadFill'),
+        pill=$('#pill'),pillText=$('#pillText'),foot=$('#footMsg'),footR=$('#footRight');
+  let raf=null,startTs=0,speed=1,curIdx=-1,revealEls=[],finished=false;
+
+  function renderStage(i){
+    const s=STAGES[i];
+    curIdx=i;
+    panel.innerHTML=`<div class="ph"><div><div class="k">Stage ${String(i+1).padStart(2,'0')} / 06</div><h3>${s.name.replace('&','&amp;')}</h3><p>${s.desc}</p></div><div class="dur">${s.dur.toFixed(1)}s</div></div><div class="pb">${s.body()}</div>`;
+    revealEls=[...panel.querySelectorAll('[data-at]')];
+  }
+  function reveal(p){
+    revealEls.forEach(el=>{
+      const at=parseFloat(el.dataset.at);
+      const un=el.dataset.until?parseFloat(el.dataset.until):Infinity;
+      const on=p>=at&&p<un;
+      if(el.classList.contains('on')!==on) el.classList.toggle('on',on);
+    });
+  }
+  function setPill(cls,text){pill.className='pill '+cls;pillText.textContent=text;}
+
+  function ui(idx,p,t,mode){
+    clock.innerHTML=t.toFixed(2)+'<small>s</small>';
+    bar.style.width=Math.min(100,t/BUDGET*100)+'%';
+    thread.style.height=Math.min(100,(idx+p)/5*100)+'%';
+    stBtns.forEach((b,i)=>{
+      const done=i<idx||(mode==='done');
+      b.classList.toggle('done',done&&!(i===idx&&mode!=='done'&&mode!=='scrub'&&false));
+      b.classList.toggle('active',i===idx&&mode!=='done');
+    });
+    if(mode==='done'){
+      setPill('ok','Healed · verified');
+      foot.innerHTML='<b>✓ Verified patch ready</b> · Vitest passed · 225ms rollback armed';
+      footR.textContent='total '+TOTAL.toFixed(1)+'s of '+BUDGET+'s budget';
+    } else if(mode==='scrub'){
+      setPill(idx===0?'crash':'heal','Inspecting stage '+(idx+1));
+      foot.textContent='Paused · viewing artifacts from stage '+(idx+1);
+      footR.textContent='press Replay to run the full loop';
+    } else {
+      setPill(idx===0?'crash':'heal',idx===0?'Crash detected':'Healing');
+      foot.textContent=STAGES[idx].msg;
+      footR.textContent='stage '+(idx+1)+' / 6';
+    }
+  }
+
+  function update(t,mode){
+    let idx=STAGES.findIndex(s=>t<s.end);
+    if(idx<0) idx=N-1;
+    const s=STAGES[idx];
+    const p=Math.max(0,Math.min(1,(t-s.start)/s.dur));
+    if(idx!==curIdx) renderStage(idx);
+    reveal(p);
+    ui(idx,p,t,mode);
+  }
+
+  function frame(now){
+    const t=Math.min(TOTAL,(now-startTs)/1000*speed);
+    if(t>=TOTAL){finish();return;}
+    update(t,'play');
+    raf=requestAnimationFrame(frame);
+  }
+  function play(){
+    cancelAnimationFrame(raf);
+    finished=false;curIdx=-1;
+    startTs=performance.now();
+    raf=requestAnimationFrame(frame);
+  }
+  function finish(){
+    cancelAnimationFrame(raf);
+    finished=true;
+    renderStage(N-1);reveal(1);
+    ui(N-1,1,TOTAL,'done');
+    bar.style.width=(TOTAL/BUDGET*100)+'%';
+  }
+  function seek(i){
+    cancelAnimationFrame(raf);
+    renderStage(i);reveal(1);
+    ui(i,1,STAGES[i].end,'scrub');
+  }
+
+  $('#replay').addEventListener('click',play);
+  $('#speed').addEventListener('click',e=>{
+    const b=e.target.closest('button');if(!b)return;
+    speed=parseFloat(b.dataset.s);
+    [...$('#speed').children].forEach(x=>x.classList.toggle('on',x===b));
+    play();
+  });
+
+  /* initial idle render */
+  renderStage(0);reveal(0);
+  setPill('','Awaiting crash');
+  clock.innerHTML='0.00<small>s</small>';
+
+  const reduce=window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const box=$('#theaterBox');
+  let started=false;
+  if('IntersectionObserver' in window){
+    new IntersectionObserver((es,ob)=>{
+      es.forEach(e=>{
+        if(e.isIntersecting&&!started){
+          started=true;ob.disconnect();
+          reduce?finish():play();
+        }
+      });
+    },{threshold:.35}).observe(box);
+  } else { started=true; reduce?finish():play(); }
+
+  /* ---------- COUNT-UP ---------- */
+  const counters=[...document.querySelectorAll('[data-count]')];
+  if('IntersectionObserver' in window&&!reduce){
+    const io=new IntersectionObserver((es)=>{
+      es.forEach(e=>{
+        if(!e.isIntersecting)return;
+        io.unobserve(e.target);
+        const el=e.target,to=parseFloat(el.dataset.count),d=parseInt(el.dataset.dec||0);
+        const t0=performance.now(),dur=1200;
+        (function tick(n){
+          const k=Math.min(1,(n-t0)/dur),v=to*(1-Math.pow(1-k,3));
+          el.textContent=v.toFixed(d);
+          if(k<1)requestAnimationFrame(tick);
+        })(t0);
+      });
+    },{threshold:.6});
+    counters.forEach(c=>{c.textContent=(0).toFixed(parseInt(c.dataset.dec||0));io.observe(c);});
+  }
+})();
+</script>
+</body>
+</html>
