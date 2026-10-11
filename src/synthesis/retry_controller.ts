@@ -112,6 +112,9 @@ export class RetryController {
     // Run tests again
     const test2 = await this.runTests();
     console.log(`[RetryController] Attempt 2 test result: ${test2.passed ? 'PASSED ✅' : 'FAILED ❌'}`);
+    if (!test2.passed) {
+      console.log(`[RetryController] Attempt 2 test failure output:\n${test2.output}`);
+    }
 
     attempts.push({
       attempt: 2,

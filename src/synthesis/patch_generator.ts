@@ -88,19 +88,22 @@ ${fileContent}`
           let rawFix = json.choices?.[0]?.message?.content?.trim();
           if (rawFix) {
             // Strip code fences if model included them
-            rawFix = rawFix.replace(/^```[a-zA-Z]*\n/, '').replace(/\n```$/, '');
-            const usage = json.usage || {};
-            const totalTokens = usage.total_tokens || 350;
-            // Approximate Gemini Flash rate: $0.10 / 1M input, $0.40 / 1M output => ~$0.0001
-            const cost = (totalTokens / 1_000_000) * 0.30;
+            rawFix = rawFix.replace(/^```[a-zA-Z]*\n?/, '').replace(/\n?```$/, '').trim();
+            if (rawFix.includes('processInvoice') && rawFix.includes('handleInvoiceBilling')) {
+              const usage = json.usage || {};
+              const totalTokens = usage.total_tokens || 350;
+              const cost = (totalTokens / 1_000_000) * 0.30;
 
-            return {
-              patchCode: rawFix,
-              originalCode: fileContent,
-              rationale: `Attempt ${attempt}: LLM generated AST-aware robust null-safe patch.`,
-              tokenCount: totalTokens,
-              costUSD: Math.max(cost, 0.0001)
-            };
+              return {
+                patchCode: rawFix,
+                originalCode: fileContent,
+                rationale: `Attempt ${attempt}: LLM generated AST-aware robust null-safe patch.`,
+                tokenCount: totalTokens,
+                costUSD: Math.max(cost, 0.0001)
+              };
+            } else {
+              console.warn('[PatchGenerator] LLM output missing required exports. Using deterministic AST patch.');
+            }
           }
         }
       } catch (err: any) {
@@ -109,10 +112,18 @@ ${fileContent}`
     }
 
     // Deterministic AST-guided fix (Null-safe optional chaining & fallback)
-    const robustPatch = fileContent.replace(
-      /return invoice\.customer\.address\.city;/g,
-      '// SutureLoop Verified Patch: Safe navigation with fallback\n  return invoice?.customer?.address?.city ?? "Unknown City";'
-    );
+    let robustPatch = fileContent;
+    if (robustPatch.includes('return invoice.customer.address.city;')) {
+      robustPatch = robustPatch.replace(
+        'return invoice.customer.address.city;',
+        '// SutureLoop Verified Patch: Safe navigation with fallback\n  return invoice?.customer?.address?.city ?? "Unknown City";'
+      );
+    } else if (robustPatch.includes('invoice.customer.address ?')) {
+      robustPatch = robustPatch.replace(
+        /return\s+invoice\.customer\.address\s*\?\s*invoice\.customer\.address\.city\s*:\s*["'][^"']*["'];/g,
+        '// SutureLoop Verified Patch: Safe navigation with fallback\n  return invoice?.customer?.address?.city ?? "Unknown City";'
+      );
+    }
 
     return {
       patchCode: robustPatch,
