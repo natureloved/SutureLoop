@@ -2,6 +2,9 @@ node_modules/
 dist/
 .env
 scratch/
+runs/
+.agents/
 *.log
 demo/tests/reproduction.test.ts
 .neatlogs_local_spans.json
+
