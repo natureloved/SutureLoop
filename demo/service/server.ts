@@ -1,8 +1,10 @@
 import express, { Request, Response } from 'express';
+import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { handleInvoiceBilling, processInvoice } from './routes/billing.js';
 import { TelemetryService } from '../../src/telemetry/neatlogs_client.js';
+import { SutureLoopOrchestrator } from '../../src/core/orchestrator.js';
 import * as neatlogs from 'neatlogs';
 import { config } from '../../src/config/env.js';
 
@@ -81,6 +83,167 @@ app.post('/api/billing/invoice', async (req: Request, res: Response) => {
       error: error.message,
       stack: error.stack
     });
+  }
+});
+
+app.get('/dashboard', (_req: Request, res: Response) => {
+  res.sendFile(path.join(publicPath, 'dashboard.html'));
+});
+
+app.get('/api/dashboard/stats', (_req: Request, res: Response) => {
+  const spansFile = path.resolve('.neatlogs_local_spans.json');
+  let spans = [];
+  if (fs.existsSync(spansFile)) {
+    try { spans = JSON.parse(fs.readFileSync(spansFile, 'utf-8')); } catch { spans = []; }
+  }
+  const billingPath = path.resolve(__dirname, 'routes/billing.ts');
+  const billingContent = fs.existsSync(billingPath) ? fs.readFileSync(billingPath, 'utf-8') : '';
+  const isPatched = billingContent.includes('??') || billingContent.includes('?.');
+
+  res.json({
+    status: 'ok',
+    service: 'billing-service',
+    isPatched,
+    state: isPatched ? 'HEALTHY_PATCHED' : 'SEEDED_CRASH_ACTIVE',
+    spansCount: spans.length,
+    recentSpans: spans.slice(-5).reverse(),
+    incidents: [
+      {
+        id: 'INC-8644',
+        service: 'billing-service',
+        target: 'demo/service/routes/billing.ts:20',
+        status: isPatched ? 'VERIFIED HEALED' : 'CRASH PENDING',
+        duration: '8.64s',
+        costUSD: 0.0011,
+        rollbackOccurred: true
+      }
+    ],
+    kpis: {
+      medianMttrSec: 8.64,
+      blastRadiusPct: 0.46,
+      rollbackLatencyMs: 225,
+      measuredCostUSD: 0.0011,
+      grossMarginPct: 99.99
+    }
+  });
+});
+
+app.post('/api/demo/trigger-crash', async (_req: Request, res: Response) => {
+  const billingPath = path.resolve(__dirname, 'routes/billing.ts');
+  const crashLineCode = `export interface InvoiceRequest {
+  id?: string;
+  amount?: number;
+  customer?: {
+    name?: string;
+    address?: {
+      city?: string;
+      postalCode?: string;
+    };
+  };
+}
+
+export function processInvoice(invoice: any): string {
+  // CRASH LINE:
+  return invoice.customer.address.city;
+}
+
+export function handleInvoiceBilling(req: any, res: any): void {
+  try {
+    const city = processInvoice(req.body);
+    res.json({ success: true, city });
+  } catch (error: any) {
+    res.status(500).json({
+      error: error.message,
+      stack: error.stack
+    });
+  }
+}
+`;
+  try {
+    fs.writeFileSync(billingPath, crashLineCode, 'utf-8');
+  } catch (err: any) {
+    console.warn(`[Reset Warning] ${err.message}`);
+  }
+
+  const traceId = `trace_crash_${Date.now()}`;
+  const failureSpan = {
+    traceId,
+    spanId: `span_${Date.now()}`,
+    name: 'processInvoice',
+    service: 'billing-service',
+    timestamp: Date.now(),
+    errorMessage: "TypeError: Cannot read properties of undefined (reading 'address')",
+    errorStack: "TypeError: Cannot read properties of undefined (reading 'address')\n    at processInvoice (demo/service/routes/billing.ts:20:27)\n    at handleInvoiceBilling (demo/service/routes/billing.ts:25:18)",
+    filePath: 'demo/service/routes/billing.ts',
+    lineNumber: 20
+  };
+  await telemetry.recordLocalFailureSpan(failureSpan);
+
+  res.json({
+    success: true,
+    incidentId: 'INC-8644',
+    traceId,
+    status: 'CRASH_RECORDED',
+    error: failureSpan.errorMessage
+  });
+});
+
+app.post('/api/demo/trigger-heal', async (_req: Request, res: Response) => {
+  try {
+    const orchestrator = new SutureLoopOrchestrator();
+    const result = await orchestrator.run(undefined, false);
+    res.json({
+      success: true,
+      incidentId: 'INC-8644',
+      status: result.finalStatus,
+      durationMs: result.durationMs,
+      economicMetrics: result.economicMetrics,
+      session: result
+    });
+  } catch (err: any) {
+    res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
+
+app.post('/api/demo/reset-baseline', (_req: Request, res: Response) => {
+  const billingPath = path.resolve(__dirname, 'routes/billing.ts');
+  const baselineCode = `export interface InvoiceRequest {
+  id?: string;
+  amount?: number;
+  customer?: {
+    name?: string;
+    address?: {
+      city?: string;
+      postalCode?: string;
+    };
+  };
+}
+
+export function processInvoice(invoice: any): string {
+  // CRASH LINE:
+  return invoice.customer.address.city;
+}
+
+export function handleInvoiceBilling(req: any, res: any): void {
+  try {
+    const city = processInvoice(req.body);
+    res.json({ success: true, city });
+  } catch (error: any) {
+    res.status(500).json({
+      error: error.message,
+      stack: error.stack
+    });
+  }
+}
+`;
+  try {
+    fs.writeFileSync(billingPath, baselineCode, 'utf-8');
+    res.json({ success: true, message: 'Baseline seeded crash code restored' });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 

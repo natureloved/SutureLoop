@@ -12,6 +12,7 @@
     "demo": "tsx bin/sutureloop.ts demo --demo-force-fault",
     "demo:server": "tsx demo/service/server.ts",
     "serve": "tsx demo/service/server.ts",
+    "dev": "tsx watch demo/service/server.ts",
     "demo:heal": "tsx bin/sutureloop.ts auto-heal",
     "demo:fail": "tsx bin/sutureloop.ts auto-heal --demo-force-fault"
   },
