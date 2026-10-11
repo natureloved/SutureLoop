@@ -21,7 +21,7 @@
 *{box-sizing:border-box;margin:0;padding:0}
 html{scroll-behavior:smooth}
 body{
-  background:var(--bg);color:var(--text);font-family:var(--sans);line-height:1.5;
+  background:var(--bg);color:var(--text);font-family:var(--sans);line-height:1.55;
   -webkit-font-smoothing:antialiased;overflow-x:hidden;min-height:100vh;
 }
 body::before{
@@ -72,9 +72,9 @@ nav{position:sticky;top:0;z-index:50;backdrop-filter:blur(14px);background:rgba(
 .btn.danger:hover{background:var(--crash);color:#fff}
 .btn.sm{padding:6px 12px;font-size:12px}
 
-/* COMMAND BAR */
+/* COMMAND COCKPIT */
 .command-bar{
-  margin:20px 0 18px;padding:14px 20px;border:1px solid var(--line2);border-radius:18px;
+  margin:20px 0 16px;padding:14px 20px;border:1px solid var(--line2);border-radius:18px;
   background:linear-gradient(180deg,var(--panel),var(--bg2));
   display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:16px;
   box-shadow:0 12px 40px -20px rgba(0,0,0,.8);
@@ -99,22 +99,41 @@ nav{position:sticky;top:0;z-index:50;backdrop-filter:blur(14px);background:rgba(
 .kpi-val em{color:var(--ok);font-style:normal}
 .kpi-sub{font:500 11.5px var(--mono);color:var(--mute)}
 
-/* 3-COLUMN ERGONOMIC BENTO GRID */
-.bento-grid{display:grid;grid-template-columns:330px 1fr 380px;gap:18px;margin-bottom:40px}
+/* SECTION TABS NAVIGATION */
+.section-nav{
+  display:flex;gap:8px;border-bottom:1px solid var(--line);margin-bottom:22px;
+  overflow-x:auto;padding-bottom:2px;
+}
+.sec-tab{
+  display:inline-flex;align-items:center;gap:8px;padding:12px 18px;
+  background:none;border:none;border-bottom:2px solid transparent;
+  color:var(--mute);font:600 13px var(--mono);cursor:pointer;transition:.2s;
+  white-space:nowrap;
+}
+.sec-tab:hover{color:var(--text)}
+.sec-tab.active{color:var(--ok);border-bottom-color:var(--ok)}
+.sec-tab svg{width:15px;height:15px}
 
+.tab-pane{display:none;animation:fadeIn .3s ease-out}
+.tab-pane.active{display:block}
+@keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+
+/* CARD BOX STYLING */
 .card-box{
   background:linear-gradient(180deg,var(--panel),var(--bg2));
   border:1px solid var(--line);border-radius:16px;overflow:hidden;margin-bottom:18px;
 }
 .card-head{
   display:flex;align-items:center;justify-content:space-between;
-  padding:12px 18px;border-bottom:1px solid var(--line);background:rgba(0,0,0,.25);
+  padding:14px 20px;border-bottom:1px solid var(--line);background:rgba(0,0,0,.25);
 }
-.card-head h3{font-size:13.5px;font-weight:600;display:flex;align-items:center;gap:8px}
-.card-head h3 svg{width:15px;height:15px;color:var(--ok)}
-.card-body{padding:16px 18px}
+.card-head h3{font-size:14px;font-weight:600;display:flex;align-items:center;gap:9px}
+.card-head h3 svg{width:16px;height:16px;color:var(--ok)}
+.card-body{padding:20px}
 
-/* INCIDENT FEED */
+/* TAB 1: INCIDENT 2-COL LAYOUT */
+.incident-grid{display:grid;grid-template-columns:340px 1fr;gap:20px}
+
 .inc-item{
   padding:12px;border:1px solid var(--line);border-radius:12px;margin-bottom:8px;
   background:var(--panel2);cursor:pointer;transition:.2s;
@@ -130,40 +149,41 @@ nav{position:sticky;top:0;z-index:50;backdrop-filter:blur(14px);background:rgba(
 .inc-meta{display:flex;justify-content:space-between;font:11px var(--mono);color:var(--dim)}
 
 /* SPAN TRACE WATERFALL */
-.trace-row{display:grid;grid-template-columns:110px 1fr 50px;gap:10px;align-items:center;font:11px var(--mono);padding:7px 0;border-bottom:1px solid var(--line)}
-.trace-bar{height:10px;border-radius:3px;background:var(--line);position:relative}
+.trace-row{display:grid;grid-template-columns:120px 1fr 60px;gap:12px;align-items:center;font:11.5px var(--mono);padding:9px 0;border-bottom:1px solid var(--line)}
+.trace-bar{height:12px;border-radius:3px;background:var(--line);position:relative}
 .trace-fill{position:absolute;top:0;bottom:0;border-radius:3px}
 .trace-fill.ok{background:var(--ok)}
 .trace-fill.crash{background:var(--crash)}
 
+/* UNIFIED DIFF (FULL-WIDTH) */
+.diff-box{background:#080b0c;border:1px solid var(--line);border-radius:12px;overflow:hidden;font:12.5px/1.85 var(--mono);margin:14px 0 20px}
+.diff-hdr{padding:9px 16px;border-bottom:1px solid var(--line);color:var(--mute);display:flex;justify-content:space-between;background:rgba(0,0,0,.35);font-size:12px}
+.d-row{display:flex;padding:0 16px;white-space:pre;overflow-x:auto}
+.d-row i{width:20px;font-style:normal;color:var(--dim);flex:none}
+.d-del{background:rgba(255,90,69,.09);color:#ffbcb2}.d-del i{color:var(--crash)}
+.d-add{background:rgba(110,242,192,.09);color:#c3f9e3}.d-add i{color:var(--ok)}
+
 /* GRAPH VISUALIZER */
-.ast-node{padding:10px 12px;border:1px solid var(--line);border-radius:10px;margin-bottom:6px;font:11.5px var(--mono);display:flex;align-items:center;justify-content:space-between}
+.ast-node{padding:12px 14px;border:1px solid var(--line);border-radius:10px;margin-bottom:8px;font:12px var(--mono);display:flex;align-items:center;justify-content:space-between}
 .ast-node.root{background:rgba(255,90,69,.08);border-color:rgba(255,90,69,.35);color:#ffbcb2}
 .ast-node.caller{background:rgba(255,181,71,.08);border-color:rgba(255,181,71,.35);color:#ffd99e}
 .ast-node.test{background:rgba(110,242,192,.08);border-color:rgba(110,242,192,.35);color:#c3f9e3}
 
-/* UNIFIED DIFF */
-.diff-box{background:#080b0c;border:1px solid var(--line);border-radius:12px;overflow:hidden;font:12px/1.8 var(--mono);margin-top:10px}
-.diff-hdr{padding:7px 12px;border-bottom:1px solid var(--line);color:var(--mute);display:flex;justify-content:space-between;background:rgba(0,0,0,.3);font-size:11.5px}
-.d-row{display:flex;padding:0 12px;white-space:pre;overflow-x:auto}
-.d-row i{width:18px;font-style:normal;color:var(--dim);flex:none}
-.d-del{background:rgba(255,90,69,.09);color:#ffbcb2}.d-del i{color:var(--crash)}
-.d-add{background:rgba(110,242,192,.09);color:#c3f9e3}.d-add i{color:var(--ok)}
-
-/* CFO LEDGER */
-.ledger-row{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px dashed var(--line2);font:12px var(--mono);color:var(--mute)}
-.ledger-row:last-child{border:0;color:var(--text);font-weight:600;padding-top:10px}
+/* CFO LEDGER & TIERS */
+.cfo-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+.ledger-row{display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px dashed var(--line2);font:12.5px var(--mono);color:var(--mute)}
+.ledger-row:last-child{border:0;color:var(--text);font-weight:600;padding-top:14px}
 .ledger-row b{color:var(--text);font-weight:500}
-.ledger-row:last-child b{color:var(--ok);font-size:13.5px}
+.ledger-row:last-child b{color:var(--ok);font-size:14.5px}
 
-.model-table{width:100%;border-collapse:collapse;margin-top:10px;font:11.5px var(--mono)}
-.model-table th{text-align:left;color:var(--dim);padding:6px 8px;border-bottom:1px solid var(--line)}
-.model-table td{padding:8px;border-bottom:1px solid var(--line);color:var(--mute)}
+.model-table{width:100%;border-collapse:collapse;margin-top:12px;font:12px var(--mono)}
+.model-table th{text-align:left;color:var(--dim);padding:8px 10px;border-bottom:1px solid var(--line);font-size:11px;text-transform:uppercase}
+.model-table td{padding:10px;border-bottom:1px solid var(--line);color:var(--mute)}
 .model-table tr:last-child td{border-bottom:0}
 
-/* TERMINAL OUTPUT */
-.term-box{background:#080b0c;border:1px solid var(--line);border-radius:12px;padding:12px;font:11.5px/1.8 var(--mono);color:#b9c4be;max-height:220px;overflow-y:auto}
-.term-box .log-ts{color:var(--dim);margin-right:6px}
+/* TERMINAL OUTPUT (FULL-WIDTH AUDIT CONSOLE) */
+.term-box{background:#080b0c;border:1px solid var(--line);border-radius:12px;padding:16px;font:12px/1.85 var(--mono);color:#b9c4be;max-height:450px;overflow-y:auto}
+.term-box .log-ts{color:var(--dim);margin-right:8px}
 .term-box .log-ok{color:var(--ok)}
 .term-box .log-warn{color:var(--warn)}
 .term-box .log-err{color:var(--crash)}
@@ -172,7 +192,7 @@ nav{position:sticky;top:0;z-index:50;backdrop-filter:blur(14px);background:rgba(
 #sutureToast{
   position:fixed;bottom:24px;right:24px;z-index:100;
   background:rgba(14,19,21,.95);backdrop-filter:blur(16px);
-  border:1px solid var(--ok);border-radius:14px;padding:12px 18px;
+  border:1px solid var(--ok);border-radius:14px;padding:14px 18px;
   font:500 12.5px var(--mono);color:var(--text);
   box-shadow:0 20px 50px rgba(0,0,0,.85),0 0 20px rgba(110,242,192,.25);
   display:flex;align-items:center;gap:10px;
@@ -182,14 +202,14 @@ nav{position:sticky;top:0;z-index:50;backdrop-filter:blur(14px);background:rgba(
 #sutureToast.show{transform:none;opacity:1}
 
 /* RESPONSIVE */
-@media(max-width:1200px){
+@media(max-width:1100px){
   .bento-kpis{grid-template-columns:repeat(2,1fr)}
-  .bento-grid{grid-template-columns:1fr 1fr}
-  .bento-grid > div:last-child{grid-column:1/-1}
+  .incident-grid{grid-template-columns:1fr}
+  .cfo-grid{grid-template-columns:1fr}
 }
-@media(max-width:800px){
-  .bento-grid{grid-template-columns:1fr}
+@media(max-width:750px){
   .command-bar{flex-direction:column;align-items:flex-start}
+  .bento-kpis{grid-template-columns:1fr}
 }
 </style>
 </head>
@@ -223,7 +243,7 @@ nav{position:sticky;top:0;z-index:50;backdrop-filter:blur(14px);background:rgba(
 </nav>
 
 <main class="wrap">
-  <!-- COMMAND BAR -->
+  <!-- PERSISTENT COMMAND COCKPIT -->
   <div class="command-bar">
     <div class="live-status">
       <div class="pulse-dot" id="liveDot"></div>
@@ -252,7 +272,7 @@ nav{position:sticky;top:0;z-index:50;backdrop-filter:blur(14px);background:rgba(
     </div>
   </div>
 
-  <!-- 4 HIGH-IMPACT BENTO KPIS -->
+  <!-- PERSISTENT EXECUTIVE BENTO KPIS -->
   <div class="bento-kpis">
     <div class="kpi-card ok">
       <div class="kpi-label">Remediation SLA</div>
@@ -276,284 +296,357 @@ nav{position:sticky;top:0;z-index:50;backdrop-filter:blur(14px);background:rgba(
     </div>
   </div>
 
-  <!-- 3-ZONE BENTO LAYOUT -->
-  <div class="bento-grid">
-    <!-- ZONE 1: INCIDENTS & SPANS (LEFT) -->
-    <div>
-      <div class="card-box">
-        <div class="card-head">
-          <h3>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
-            Incident Queue &amp; Triage
-          </h3>
-          <span class="badge-tag">INC-8644</span>
-        </div>
-        <div class="card-body">
-          <div class="inc-item active" id="incCard8644">
-            <div class="inc-top">
-              <span class="inc-id">INC-8644</span>
-              <span class="inc-pill healed" id="pillStatus8644">● VERIFIED HEALED</span>
-            </div>
-            <div class="inc-desc">billing-service · routes/billing.ts:20</div>
-            <div class="inc-meta">
-              <span>Latency: 8.64s</span>
-              <span>Cost: $0.0011</span>
-              <span>Rollback: 225ms</span>
-            </div>
-          </div>
+  <!-- SECTION TABS NAVIGATION -->
+  <div class="section-nav" role="tablist">
+    <button class="sec-tab active" data-target="tab-incident" role="tab" aria-selected="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+      Active Incident &amp; Verified Diff
+    </button>
+    <button class="sec-tab" data-target="tab-entire" role="tab" aria-selected="false">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="8" r="2.5"/><circle cx="12" cy="18" r="2.5"/><path d="M8 7l8 1M7 8l4 8M17 10l-4 6"/></svg>
+      Entire AST Code Graph &amp; Rollback
+    </button>
+    <button class="sec-tab" data-target="tab-cfo" role="tab" aria-selected="false">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+      cfo.ai Financial Governance
+    </button>
+    <button class="sec-tab" data-target="tab-terminal" role="tab" aria-selected="false">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+      Execution Audit Stream
+    </button>
+  </div>
 
-          <div class="inc-item">
-            <div class="inc-top">
-              <span class="inc-id">INC-8645</span>
-              <span class="inc-pill healed">● VERIFIED HEALED</span>
-            </div>
-            <div class="inc-desc">payments-gateway · src/checkout.ts:88</div>
-            <div class="inc-meta">
-              <span>Latency: 7.92s</span>
-              <span>Cost: $0.0009</span>
-              <span>Rollback: 0ms</span>
-            </div>
+  <!-- TAB 1: ACTIVE INCIDENT & VERIFIED DIFF (2 CLEAN COLUMNS) -->
+  <div class="tab-pane active" id="tab-incident">
+    <div class="incident-grid">
+      <!-- LEFT: INCIDENTS & SPANS -->
+      <div>
+        <div class="card-box">
+          <div class="card-head">
+            <h3>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+              Incident Queue
+            </h3>
+            <span class="badge-tag">INC-8644</span>
           </div>
+          <div class="card-body">
+            <div class="inc-item active" id="incCard8644">
+              <div class="inc-top">
+                <span class="inc-id">INC-8644</span>
+                <span class="inc-pill healed" id="pillStatus8644">● VERIFIED HEALED</span>
+              </div>
+              <div class="inc-desc">billing-service · routes/billing.ts:20</div>
+              <div class="inc-meta">
+                <span>Latency: 8.64s</span>
+                <span>Cost: $0.0011</span>
+                <span>Rollback: 225ms</span>
+              </div>
+            </div>
 
-          <div class="inc-item">
-            <div class="inc-top">
-              <span class="inc-id">INC-8643</span>
-              <span class="inc-pill healed">● VERIFIED HEALED</span>
+            <div class="inc-item">
+              <div class="inc-top">
+                <span class="inc-id">INC-8645</span>
+                <span class="inc-pill healed">● VERIFIED HEALED</span>
+              </div>
+              <div class="inc-desc">payments-gateway · src/checkout.ts:88</div>
+              <div class="inc-meta">
+                <span>Latency: 7.92s</span>
+                <span>Cost: $0.0009</span>
+                <span>Rollback: 0ms</span>
+              </div>
             </div>
-            <div class="inc-desc">promo-rules · src/promo/resolve.ts:34</div>
-            <div class="inc-meta">
-              <span>Latency: 9.14s</span>
-              <span>Cost: $0.0014</span>
-              <span>Rollback: 218ms</span>
-            </div>
-          </div>
-        </div>
-      </div>
 
-      <!-- NEATLOGS SPAN FEED -->
-      <div class="card-box">
-        <div class="card-head">
-          <h3>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-            neatlogs Real-Time Telemetry
-          </h3>
-          <span class="mono" style="font-size:11px;color:var(--dim)">v1.1.26</span>
-        </div>
-        <div class="card-body">
-          <div id="spansList">
-            <div class="trace-row">
-              <span style="color:var(--crash)">FATAL 500</span>
-              <span>processInvoice</span>
-              <span style="text-align:right">312ms</span>
+            <div class="inc-item">
+              <div class="inc-top">
+                <span class="inc-id">INC-8643</span>
+                <span class="inc-pill healed">● VERIFIED HEALED</span>
+              </div>
+              <div class="inc-desc">promo-rules · src/promo/resolve.ts:34</div>
+              <div class="inc-meta">
+                <span>Latency: 9.14s</span>
+                <span>Cost: $0.0014</span>
+                <span>Rollback: 218ms</span>
+              </div>
             </div>
-            <div class="trace-row">
-              <span style="color:var(--ok)">PASS 200</span>
-              <span>processInvoice (safe)</span>
-              <span style="text-align:right">94ms</span>
-            </div>
-            <div class="trace-row" style="border:0">
-              <span style="color:var(--ok)">PASS 200</span>
-              <span>handleInvoiceBilling</span>
-              <span style="text-align:right">98ms</span>
-            </div>
-          </div>
-          <div style="margin-top:12px;font:11px var(--mono);color:var(--mute)">
-            Project: <code>0e15858c</code> · <a href="https://app.neatlogs.com" target="_blank" style="color:var(--ok)">neatlogs Cloud Dashboard →</a>
           </div>
         </div>
-      </div>
-    </div>
 
-    <!-- ZONE 2: CODE GRAPH & VERIFIED DIFF (CENTER) -->
-    <div>
-      <div class="card-box">
-        <div class="card-head">
-          <h3>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="8" r="2.5"/><circle cx="12" cy="18" r="2.5"/><path d="M8 7l8 1M7 8l4 8M17 10l-4 6"/></svg>
-            Entire AST Code Graph &amp; Blast Radius Fence
-          </h3>
-          <span class="badge-tag">ScopeFence[1 file, 3 callers]</span>
-        </div>
-        <div class="card-body">
-          <div style="font:12px var(--mono);color:var(--mute);margin-bottom:10px">
-            Entire Query: <code>entire graph impact --symbol demo/service/routes/billing.ts:20</code>
+        <!-- NEATLOGS SPAN FEED -->
+        <div class="card-box">
+          <div class="card-head">
+            <h3>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+              neatlogs Span Telemetry
+            </h3>
+            <span class="mono" style="font-size:11px;color:var(--dim)">v1.1.26</span>
           </div>
-          <div class="ast-node root">
-            <span>✕ Fault Origin: <b>processInvoice(invoice: any)</b></span>
-            <span>demo/service/routes/billing.ts:20</span>
-          </div>
-          <div class="ast-node caller">
-            <span>├── Caller 1: <b>handleInvoiceBilling()</b></span>
-            <span>demo/service/routes/billing.ts:26</span>
-          </div>
-          <div class="ast-node caller">
-            <span>├── Caller 2: <b>POST /api/billing/invoice</b></span>
-            <span>demo/service/server.ts:30</span>
-          </div>
-          <div class="ast-node test">
-            <span>└── Test Target: <b>billing.test.ts</b> (Vitest)</span>
-            <span>demo/tests/billing.test.ts:5</span>
-          </div>
-          <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
-            <span class="badge-tag">653 AST Relations</span>
-            <span class="badge-tag">3 Callers Fenced</span>
-            <span class="badge-tag">0 Scope Leakage</span>
-          </div>
-        </div>
-      </div>
-
-      <!-- UNIFIED DIFF & COMPARATIVE EVAL -->
-      <div class="card-box">
-        <div class="card-head">
-          <h3>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
-            Verified Patch Diff &amp; Comparative Trace Waterfall
-          </h3>
-          <span class="inc-pill healed" id="diffBadge">14/14 VITEST PASS</span>
-        </div>
-        <div class="card-body">
-          <div style="font:11.5px var(--mono);color:var(--dim);margin-bottom:6px">
-            Checkpoint: <code>cp_1791730154393_baseline-pre-heal</code> · Rollback: <b>225ms</b>
-          </div>
-
-          <!-- DIFF -->
-          <div class="diff-box">
-            <div class="diff-hdr">
-              <span>demo/service/routes/billing.ts</span>
-              <span>@@ -18,6 +18,6 @@</span>
-            </div>
-            <div class="d-row"><i> </i>export function processInvoice(invoice: any): string {</div>
-            <div class="d-row d-del" id="diffDelLine"><i>-</i>  return invoice.customer.address.city;</div>
-            <div class="d-row d-add" id="diffAddLine"><i>+</i>  return invoice?.customer?.address?.city ?? "Unknown City";</div>
-            <div class="d-row"><i> </i>}</div>
-          </div>
-
-          <!-- COMPARATIVE TRACE WATERFALL -->
-          <div style="margin-top:16px">
-            <div style="font:600 11.5px var(--mono);color:var(--text);margin-bottom:8px">
-              Comparative Trace Span Evaluation (neatlogs)
-            </div>
-            <div style="background:#080b0c;border:1px solid var(--line);border-radius:10px;padding:10px">
+          <div class="card-body">
+            <div id="spansList">
               <div class="trace-row">
-                <span style="color:var(--crash)">Baseline</span>
-                <div class="trace-bar"><div class="trace-fill crash" style="width:100%"></div></div>
+                <span style="color:var(--crash)">FATAL 500</span>
+                <span>processInvoice</span>
                 <span style="text-align:right">312ms</span>
               </div>
-              <div class="trace-row" style="border:0">
-                <span style="color:var(--ok)">Patched</span>
-                <div class="trace-bar"><div class="trace-fill ok" style="width:30%"></div></div>
+              <div class="trace-row">
+                <span style="color:var(--ok)">PASS 200</span>
+                <span>processInvoice (safe)</span>
                 <span style="text-align:right">94ms</span>
               </div>
+              <div class="trace-row" style="border:0">
+                <span style="color:var(--ok)">PASS 200</span>
+                <span>handleInvoiceBilling</span>
+                <span style="text-align:right">98ms</span>
+              </div>
             </div>
-            <div style="display:flex;justify-content:space-between;font:11px var(--mono);color:var(--dim);margin-top:6px">
-              <span>Error Delta: 1 → 0 (-100%)</span>
-              <span>Span Drift: 0ms unnecessary overhead</span>
+            <div style="margin-top:12px;font:11px var(--mono);color:var(--mute)">
+              Project: <code>0e15858c</code> · <a href="https://app.neatlogs.com" target="_blank" style="color:var(--ok)">neatlogs Cloud Dashboard →</a>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- RIGHT: SPACIOUS DIAGNOSTIC & DIFF VIEW -->
+      <div>
+        <div class="card-box">
+          <div class="card-head">
+            <h3>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+              Active Incident: INC-8644 (billing-service)
+            </h3>
+            <span class="inc-pill healed" id="diffBadge">14/14 VITEST PASS</span>
+          </div>
+          <div class="card-body">
+            <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid var(--line)">
+              <div>
+                <div style="font:600 13px var(--mono);color:var(--text)">TypeError: Cannot read properties of undefined (reading 'address')</div>
+                <div style="font:11.5px var(--mono);color:var(--mute);margin-top:3px">Target Symbol: <code>processInvoice(invoice: any)</code> in <code>demo/service/routes/billing.ts:20</code></div>
+              </div>
+              <div style="font:11.5px var(--mono);color:var(--dim)">
+                Checkpoint: <code>cp_1791730154393_baseline-pre-heal</code> · Rollback: <b>225ms</b>
+              </div>
+            </div>
+
+            <!-- UNIFIED DIFF VIEWER -->
+            <div style="font:600 12px var(--mono);color:var(--dim);margin-bottom:6px">Unified Git Diff (Fenced AST Scope):</div>
+            <div class="diff-box">
+              <div class="diff-hdr">
+                <span>demo/service/routes/billing.ts</span>
+                <span>@@ -18,6 +18,6 @@ processInvoice()</span>
+              </div>
+              <div class="d-row"><i> </i>export function processInvoice(invoice: any): string {</div>
+              <div class="d-row d-del" id="diffDelLine"><i>-</i>  return invoice.customer.address.city;</div>
+              <div class="d-row d-add" id="diffAddLine"><i>+</i>  return invoice?.customer?.address?.city ?? "Unknown City";</div>
+              <div class="d-row"><i> </i>}</div>
+            </div>
+
+            <!-- COMPARATIVE TRACE WATERFALL -->
+            <div style="margin-top:20px">
+              <div style="font:600 12px var(--mono);color:var(--text);margin-bottom:10px">
+                Comparative Trace Span Evaluation (neatlogs Before vs After)
+              </div>
+              <div style="background:#080b0c;border:1px solid var(--line);border-radius:12px;padding:14px">
+                <div class="trace-row">
+                  <span style="color:var(--crash)">Baseline (Crashed)</span>
+                  <div class="trace-bar"><div class="trace-fill crash" style="width:100%"></div></div>
+                  <span style="text-align:right">312ms</span>
+                </div>
+                <div class="trace-row" style="border:0">
+                  <span style="color:var(--ok)">Patched (Verified)</span>
+                  <div class="trace-bar"><div class="trace-fill ok" style="width:30%"></div></div>
+                  <span style="text-align:right">94ms</span>
+                </div>
+              </div>
+              <div style="display:flex;justify-content:space-between;font:11.5px var(--mono);color:var(--dim);margin-top:8px">
+                <span>Error Delta: <b>1 → 0 (-100% Errors)</b></span>
+                <span>Span Drift: <b>0ms unnecessary overhead</b></span>
+              </div>
             </div>
           </div>
         </div>
       </div>
     </div>
+  </div>
 
-    <!-- ZONE 3: CFO LEDGER & AUDIT TERMINAL (RIGHT) -->
-    <div>
-      <div class="card-box">
-        <div class="card-head">
-          <h3>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
-            cfo.ai Financial Governance Ledger
-          </h3>
-          <span class="mono" style="font-size:11px;color:var(--ok)">99.99% Margin</span>
+  <!-- TAB 2: ENTIRE AST CODE GRAPH (SPACIOUS ARCHITECTURE VIEW) -->
+  <div class="tab-pane" id="tab-entire">
+    <div class="card-box">
+      <div class="card-head">
+        <h3>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="8" r="2.5"/><circle cx="12" cy="18" r="2.5"/><path d="M8 7l8 1M7 8l4 8M17 10l-4 6"/></svg>
+          Entire AST Code Graph Resolution &amp; Checkpoint Architecture
+        </h3>
+        <span class="badge-tag">Entire CLI v0.11.4 + entire-graph v0.4.0</span>
+      </div>
+      <div class="card-body">
+        <div style="padding:14px;background:#080b0c;border:1px solid var(--line);border-radius:12px;margin-bottom:20px">
+          <div style="font:600 12px var(--mono);color:var(--ok);margin-bottom:6px">Deterministic Query:</div>
+          <code style="font-size:12.5px;color:var(--text)">entire graph impact --symbol demo/service/routes/billing.ts:20 --format json</code>
+          <p style="font-size:12.5px;color:var(--mute);margin-top:8px">
+            Walks the AST from <code>processInvoice</code> across 653 code relations in 1,011ms. Eliminates hallucinated edits by fencing mutations strictly to reachable callers and tests.
+          </p>
         </div>
-        <div class="card-body">
-          <div class="ledger-row">
-            <span>neatlogs Telemetry Ingestion</span>
-            <b>$0.00004</b>
-          </div>
-          <div class="ledger-row">
-            <span>Entire AST Code Graph Walk</span>
-            <b>$0.00004</b>
-          </div>
-          <div class="ledger-row">
-            <span>Synthesis × 2 Attempts (1,090 tok)</span>
-            <b>$0.00080</b>
-          </div>
-          <div class="ledger-row">
-            <span>Vitest Verification &amp; Replay</span>
-            <b>$0.00022</b>
-          </div>
-          <div class="ledger-row">
-            <span>Total Remediation Spend</span>
-            <b>$0.0011</b>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
+          <div>
+            <div style="font:600 12px var(--mono);color:var(--dim);margin-bottom:10px">Resolved AST Caller Hierarchy:</div>
+            <div class="ast-node root">
+              <span>✕ Fault Origin: <b>processInvoice(invoice: any)</b></span>
+              <span>demo/service/routes/billing.ts:20</span>
+            </div>
+            <div class="ast-node caller">
+              <span>├── Caller 1: <b>handleInvoiceBilling()</b></span>
+              <span>demo/service/routes/billing.ts:26</span>
+            </div>
+            <div class="ast-node caller">
+              <span>├── Caller 2: <b>POST /api/billing/invoice</b></span>
+              <span>demo/service/server.ts:30</span>
+            </div>
+            <div class="ast-node test">
+              <span>└── Selected Test Suite: <b>billing.test.ts</b> (Vitest)</span>
+              <span>demo/tests/billing.test.ts:5</span>
+            </div>
           </div>
 
-          <div style="margin-top:14px;padding:12px;background:rgba(110,242,192,.04);border:1px dashed rgba(110,242,192,.3);border-radius:12px;display:flex;justify-content:space-between;align-items:center">
-            <div>
-              <div style="font:600 12px var(--mono);color:var(--ok)">Human Triage Saved</div>
-              <div style="font:11px var(--mono);color:var(--mute)">45 min MTTR @ $125/hr</div>
+          <div>
+            <div style="font:600 12px var(--mono);color:var(--dim);margin-bottom:10px">Atomic Checkpoint Safety Net:</div>
+            <div style="background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:16px;font:12px var(--mono)">
+              <div style="display:flex;justify-content:space-between;padding-bottom:10px;border-bottom:1px solid var(--line)">
+                <span>Active Checkpoint</span>
+                <b style="color:var(--ok)">cp_1791730154393_baseline-pre-heal</b>
+              </div>
+              <div style="display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--line)">
+                <span>Rollback Latency</span>
+                <b>225 ms (measured)</b>
+              </div>
+              <div style="display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--line)">
+                <span>Retry Budget</span>
+                <b>3 attempts maximum</b>
+              </div>
+              <div style="display:flex;justify-content:space-between;padding-top:10px">
+                <span>Working Tree Integrity</span>
+                <b style="color:var(--ok)">Hash-Verified Pristine</b>
+              </div>
             </div>
-            <div style="font:400 1.8rem var(--serif);color:var(--ok)">+$93.75</div>
-          </div>
-
-          <!-- SUBSCRIPTION TIERS PROJECTION -->
-          <div style="margin-top:14px">
-            <div style="font:600 11.5px var(--mono);margin-bottom:6px;color:var(--dim)">
-              cfo.ai SaaS Tier Margins
-            </div>
-            <table class="model-table">
-              <thead>
-                <tr>
-                  <th>Tier</th>
-                  <th>Price</th>
-                  <th>Fixes</th>
-                  <th>Margin</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td>Starter</td>
-                  <td>$79/mo</td>
-                  <td>15</td>
-                  <td style="color:var(--ok)">95.5%</td>
-                </tr>
-                <tr>
-                  <td>Growth</td>
-                  <td>$199/mo</td>
-                  <td>50</td>
-                  <td style="color:var(--ok)">95.9%</td>
-                </tr>
-                <tr>
-                  <td>Scale</td>
-                  <td>$599/mo</td>
-                  <td>200</td>
-                  <td style="color:var(--ok)">99.6%</td>
-                </tr>
-              </tbody>
-            </table>
           </div>
         </div>
       </div>
+    </div>
+  </div>
 
-      <!-- AUDIT LOG TERMINAL -->
-      <div class="card-box">
-        <div class="card-head">
-          <h3>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
-            Execution Audit Stream
-          </h3>
-          <span class="mono" style="font-size:11px;color:var(--dim)">Live stdout</span>
-        </div>
-        <div class="card-body" style="padding:10px">
-          <div class="term-box" id="termOutput">
-            <div><span class="log-ts">17:02:07.114</span> <span class="log-ok">[Neatlogs]</span> Telemetry client initialized (Project 0e15858c).</div>
-            <div><span class="log-ts">17:02:07.120</span> <span class="log-ok">[Server]</span> Billing microservice listening on http://localhost:3000.</div>
-            <div><span class="log-ts">17:02:07.409</span> <span class="log-err">[Incident]</span> Caught TypeError: Cannot read properties of undefined (reading 'address').</div>
-            <div><span class="log-ts">17:02:07.412</span> <span class="log-ok">[Entire]</span> AST code graph impact resolved processInvoice across 653 relations.</div>
-            <div><span class="log-ts">17:02:07.510</span> <span class="log-warn">[Safety]</span> Checkpoint cp_1791730154393_baseline-pre-heal locked (TTL: 30s).</div>
-            <div><span class="log-ts">17:02:08.120</span> <span class="log-warn">[Retry]</span> Attempt 1 naive fix triggered regression failure.</div>
-            <div><span class="log-ts">17:02:08.345</span> <span class="log-ok">[Rollback]</span> Atomic restore completed in 225ms. Workspace pristine.</div>
-            <div><span class="log-ts">17:02:09.110</span> <span class="log-ok">[Vitest]</span> Attempt 2 AST-guided patch verified. 14/14 tests pass.</div>
-            <div><span class="log-ts">17:02:09.840</span> <span class="log-ok">[cfo.ai]</span> Remediated for $0.0011 ($93.75 MTTR value created).</div>
+  <!-- TAB 3: CFO.AI FINANCIAL GOVERNANCE (EXECUTIVE DASHBOARD) -->
+  <div class="tab-pane" id="tab-cfo">
+    <div class="card-box">
+      <div class="card-head">
+        <h3>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+          cfo.ai Financial Governance &amp; Unit Economics Engine
+        </h3>
+        <span class="badge-tag">Audited Unit Economics</span>
+      </div>
+      <div class="card-body">
+        <div class="cfo-grid">
+          <!-- ITEMIZED LEDGER -->
+          <div>
+            <div style="font:600 12px var(--mono);color:var(--dim);margin-bottom:10px">Itemized Cost per Automated Remediation:</div>
+            <div style="background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:16px">
+              <div class="ledger-row">
+                <span>neatlogs Telemetry Ingestion &amp; Dedupe</span>
+                <b>$0.00004</b>
+              </div>
+              <div class="ledger-row">
+                <span>Entire AST Code Graph Resolution</span>
+                <b>$0.00004</b>
+              </div>
+              <div class="ledger-row">
+                <span>Synthesis × 2 Attempts (1,090 tokens)</span>
+                <b>$0.00080</b>
+              </div>
+              <div class="ledger-row">
+                <span>Vitest Verification &amp; Trace Replay</span>
+                <b>$0.00022</b>
+              </div>
+              <div class="ledger-row">
+                <span>Total Measured Remediation Cost</span>
+                <b>$0.0011</b>
+              </div>
+            </div>
+
+            <div style="margin-top:16px;padding:16px;background:rgba(110,242,192,.04);border:1px dashed rgba(110,242,192,.3);border-radius:12px;display:flex;justify-content:space-between;align-items:center">
+              <div>
+                <div style="font:600 13px var(--mono);color:var(--ok)">Human On-Call Triage Savings</div>
+                <div style="font:11.5px var(--mono);color:var(--mute)">45 min MTTR saved @ standard $125/hr compensation</div>
+              </div>
+              <div style="font:400 2.2rem var(--serif);color:var(--ok)">+$93.75</div>
+            </div>
           </div>
+
+          <!-- SAAS SUBSCRIPTION TIERS MODEL -->
+          <div>
+            <div style="font:600 12px var(--mono);color:var(--dim);margin-bottom:10px">cfo.ai SaaS Tier Gross Margins:</div>
+            <div style="background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:16px">
+              <table class="model-table">
+                <thead>
+                  <tr>
+                    <th>Tier</th>
+                    <th>Price</th>
+                    <th>Included Fixes</th>
+                    <th>Gross Margin</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><b>Starter</b></td>
+                    <td>$79 / mo</td>
+                    <td>15 fixes</td>
+                    <td style="color:var(--ok);font-weight:600">95.5%</td>
+                  </tr>
+                  <tr>
+                    <td><b>Growth</b></td>
+                    <td>$199 / mo</td>
+                    <td>50 fixes</td>
+                    <td style="color:var(--ok);font-weight:600">95.9%</td>
+                  </tr>
+                  <tr>
+                    <td><b>Scale</b></td>
+                    <td>$599 / mo</td>
+                    <td>200 fixes</td>
+                    <td style="color:var(--ok);font-weight:600">99.6%</td>
+                  </tr>
+                </tbody>
+              </table>
+
+              <div style="margin-top:18px;font:11.5px var(--mono);color:var(--mute);border-top:1px solid var(--line);padding-top:14px">
+                Financial Runway: <b>18 Months</b> · Breakeven Target: <b>Month 11</b> · Projected ARR: <b>$1.2M</b><br>
+                Full audit available in <a href="file:///C:/Users/RastaDev/Desktop/Projects/SutureLoop/docs/BUSINESS-PLAN.md" style="color:var(--ok)">docs/BUSINESS-PLAN.md</a>.
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB 4: LIVE TERMINAL AUDIT CONSOLE -->
+  <div class="tab-pane" id="tab-terminal">
+    <div class="card-box">
+      <div class="card-head">
+        <h3>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+          SutureLoop Autonomous Orchestration Stream
+        </h3>
+        <span class="mono" style="font-size:11px;color:var(--dim)">Live stdout</span>
+      </div>
+      <div class="card-body" style="padding:16px">
+        <div class="term-box" id="termOutput">
+          <div><span class="log-ts">17:02:07.114</span> <span class="log-ok">[Neatlogs]</span> Telemetry client initialized (Project 0e15858c).</div>
+          <div><span class="log-ts">17:02:07.120</span> <span class="log-ok">[Server]</span> Billing microservice listening on http://localhost:3000.</div>
+          <div><span class="log-ts">17:02:07.409</span> <span class="log-err">[Incident]</span> Caught TypeError: Cannot read properties of undefined (reading 'address').</div>
+          <div><span class="log-ts">17:02:07.412</span> <span class="log-ok">[Entire]</span> AST code graph impact resolved processInvoice across 653 relations.</div>
+          <div><span class="log-ts">17:02:07.510</span> <span class="log-warn">[Safety]</span> Checkpoint cp_1791730154393_baseline-pre-heal locked (TTL: 30s).</div>
+          <div><span class="log-ts">17:02:08.120</span> <span class="log-warn">[Retry]</span> Attempt 1 naive fix triggered regression failure.</div>
+          <div><span class="log-ts">17:02:08.345</span> <span class="log-ok">[Rollback]</span> Atomic restore completed in 225ms. Workspace pristine.</div>
+          <div><span class="log-ts">17:02:09.110</span> <span class="log-ok">[Vitest]</span> Attempt 2 AST-guided patch verified. 14/14 tests pass.</div>
+          <div><span class="log-ts">17:02:09.840</span> <span class="log-ok">[cfo.ai]</span> Remediated for $0.0011 ($93.75 MTTR value created).</div>
         </div>
       </div>
     </div>
@@ -562,6 +655,26 @@ nav{position:sticky;top:0;z-index:50;backdrop-filter:blur(14px);background:rgba(
 
 <script>
 (function(){
+  // Tab Navigation Handling
+  const tabs = document.querySelectorAll('.sec-tab');
+  const panes = document.querySelectorAll('.tab-pane');
+
+  tabs.forEach(tab => {
+    tab.addEventListener('click', () => {
+      tabs.forEach(t => {
+        t.classList.remove('active');
+        t.setAttribute('aria-selected', 'false');
+      });
+      panes.forEach(p => p.classList.remove('active'));
+
+      tab.classList.add('active');
+      tab.setAttribute('aria-selected', 'true');
+      const target = document.getElementById(tab.dataset.target);
+      if (target) target.classList.add('active');
+      playAudio('click');
+    });
+  });
+
   const term = document.getElementById('termOutput');
   const liveDot = document.getElementById('liveDot');
   const liveStateText = document.getElementById('liveStateText');

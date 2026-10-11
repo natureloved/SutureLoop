@@ -14,6 +14,15 @@ const publicPath = path.resolve(__dirname, '../../public');
 
 const app = express();
 app.use(express.json());
+
+// Canonical clean URL routing
+app.get('/dashboard.html', (_req: Request, res: Response) => {
+  res.redirect(301, '/dashboard');
+});
+app.get('/dashboard', (_req: Request, res: Response) => {
+  res.sendFile(path.join(publicPath, 'dashboard.html'));
+});
+
 app.use(express.static(publicPath));
 
 const telemetry = new TelemetryService(config.neatlogsApiKey, config.traceUrlTemplate);
@@ -84,10 +93,6 @@ app.post('/api/billing/invoice', async (req: Request, res: Response) => {
       stack: error.stack
     });
   }
-});
-
-app.get('/dashboard', (_req: Request, res: Response) => {
-  res.sendFile(path.join(publicPath, 'dashboard.html'));
 });
 
 app.get('/api/dashboard/stats', (_req: Request, res: Response) => {
