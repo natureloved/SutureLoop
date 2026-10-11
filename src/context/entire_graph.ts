@@ -11,7 +11,11 @@ export async function resolveAstBlastRadius(
   filePath: string,
   line: number
 ): Promise<BlastRadiusReport> {
-  const normPath = filePath.replace(/\\/g, '/');
+  let normPath = filePath.replace(/\\/g, '/');
+  const rootPath = process.cwd().replace(/\\/g, '/');
+  if (normPath.toLowerCase().startsWith(rootPath.toLowerCase())) {
+    normPath = normPath.slice(rootPath.length).replace(/^\//, '');
+  }
   const targetSymbol = `${normPath}:${line}`;
 
   try {
