@@ -13,5 +13,5 @@ SutureLoop is an autonomous self-healing operational agent:
 ✅ Unit economics & 18-month financial runway modeled in @cfo_ai (>95% gross margin!)
 
 Demo video + full repo walkthrough below 👇
-Check out the repo: https://github.com/RastaDev/SutureLoop
+Check out the repo: https://github.com/natureloved/SutureLoop
 #AI #Automation #DevOps #TypeScript
