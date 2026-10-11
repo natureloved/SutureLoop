@@ -3,3 +3,5 @@ dist/
 .env
 scratch/
 *.log
+demo/tests/reproduction.test.ts
+.neatlogs_local_spans.json
