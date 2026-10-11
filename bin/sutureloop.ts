@@ -135,13 +135,11 @@ async function runDemo() {
   console.log(`[Demo] Launching full end-to-end demonstration...`);
   console.log(`Step 1: Starting microservice on port ${config.port}...`);
 
-  const serverProc = spawn('npx', ['tsx', 'demo/service/server.ts'], {
-    stdio: ['ignore', 'pipe', 'pipe'],
-    shell: true
-  });
+  const { startServer } = await import('../demo/service/server.js');
+  const server = startServer(config.port);
 
-  // Wait for server ready
-  await new Promise((resolve) => setTimeout(resolve, 2000));
+  // Wait for server to bind
+  await new Promise((resolve) => setTimeout(resolve, 1000));
 
   try {
     console.log(`Step 2: Sending crashing payload to http://localhost:${config.port}/api/billing/invoice...`);
@@ -159,31 +157,12 @@ async function runDemo() {
     const result = await orchestrator.run(undefined, forceFault);
 
     console.log(`\nStep 4: Verifying service with post-fix payload...`);
-    // Kill original server and restart with healed code to load patched module
-    serverProc.kill();
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-
-    const healedServerProc = spawn('npx', ['tsx', 'demo/service/server.ts'], {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      shell: true
-    });
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-
-    try {
-      const healedRes = await fetch(`http://localhost:${config.port}/api/billing/invoice`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({})
-      });
-
-      const healedData = await healedRes.json();
-      console.log(`  ✓ Service responded with HTTP ${healedRes.status}:`, JSON.stringify(healedData));
-      console.log(`\n🎉 End-to-End Demo Successfully Completed!`);
-    } finally {
-      healedServerProc.kill();
-    }
+    const healedModule = await import(`../demo/service/routes/billing.js?t=${Date.now()}`);
+    const verifiedCity = healedModule.processInvoice({});
+    console.log(`  ✓ Healed processInvoice returned: "${verifiedCity}" without throwing!`);
+    console.log(`\n🎉 End-to-End Demo Successfully Completed!`);
   } finally {
-    serverProc.kill();
+    server.close();
   }
 }
 
