@@ -3,6 +3,10 @@ import { FailureSpan, ComparativeEvalResult } from '../core/types.js';
 import { TraceInterceptor } from './trace_interceptor.js';
 import * as fs from 'fs';
 import * as path from 'path';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+
+const execAsync = promisify(exec);
 
 export class TelemetryService {
   private client: any = null;
@@ -141,6 +145,33 @@ export class TelemetryService {
       } catch (err: any) {
         console.warn(`[Neatlogs] Programmatic eval failed: ${err.message}`);
       }
+    }
+
+    // Try neatlogs-cli for authenticated cloud readback
+    try {
+      const { stdout: baselineOut } = await execAsync(`neatlogs traces get ${baselineTraceId} --json`);
+      const { stdout: healedOut } = await execAsync(`neatlogs traces get ${healedTraceId} --json`);
+      const bData = JSON.parse(baselineOut)?.data;
+      const hData = JSON.parse(healedOut)?.data;
+      if (bData && hData) {
+        const bErr = bData.status === 'ERROR' ? 1 : 0;
+        const hErr = hData.status === 'ERROR' ? 1 : 0;
+        return {
+          mode: 'PROGRAMMATIC_EVAL',
+          baselineTraceId,
+          healedTraceId,
+          baselineTraceUrl: baselineUrl,
+          healedTraceUrl: healedUrl,
+          baselineErrors: bErr,
+          healedErrors: hErr,
+          deltaErrors: bErr - hErr,
+          durationMs: hData.durationMs,
+          status: hErr === 0 ? 'VERIFIED_PASS' : 'REGRESSION_DETECTED',
+          note: 'Verified from Neatlogs public API CLI readback.'
+        };
+      }
+    } catch {
+      // Fall through to local buffer check
     }
 
     // Check local recorded traces
