@@ -247,6 +247,49 @@ export function handleInvoiceBilling(req: any, res: any): void {
   }
 });
 
+/**
+ * Universal Inbound Crash Webhook for Production Services:
+ * Receives runtime crashes from external microservices / Neatlogs webhooks / Sentry alerts,
+ * records telemetry, and triggers SutureLoop autonomous remediation!
+ */
+app.post('/api/v1/incidents/ingest', async (req: Request, res: Response) => {
+  const { service, errorMessage, errorStack, filePath, lineNumber, traceId: incomingTraceId } = req.body;
+  const traceId = incomingTraceId || `trace_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+  const span = {
+    traceId,
+    spanId: `span_${Date.now()}`,
+    name: 'runtimeException',
+    service: service || 'unknown-service',
+    timestamp: Date.now(),
+    errorMessage: errorMessage || 'Unhandled Runtime Error',
+    errorStack: errorStack || '',
+    filePath: filePath || 'demo/service/routes/billing.ts',
+    lineNumber: lineNumber || 20
+  };
+
+  await telemetry.recordLocalFailureSpan(span);
+  console.log(`[Ingest Webhook] Intercepted runtime exception from ${span.service} (Trace: ${traceId})`);
+
+  // Respond immediately with 202 Accepted so caller is not delayed
+  res.status(202).json({
+    accepted: true,
+    traceId,
+    service: span.service,
+    message: 'Incident ingested into SutureLoop autonomous operational pipeline'
+  });
+
+  // Run healing asynchronously in the background
+  (async () => {
+    try {
+      const orchestrator = new SutureLoopOrchestrator();
+      const result = await orchestrator.run(span, false);
+      console.log(`[Ingest Webhook] Autonomous healing finished for ${traceId}: Status ${result.finalStatus}`);
+    } catch (err: any) {
+      console.error(`[Ingest Webhook Error] Remediation failed for ${traceId}: ${err.message}`);
+    }
+  })();
+});
+
 app.get('/health', (_req: Request, res: Response) => {
   res.json({ status: 'ok', service: 'billing-service' });
 });

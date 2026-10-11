@@ -6,6 +6,7 @@ import { RetryController } from '../synthesis/retry_controller.js';
 import { calculateIncidentEconomics, generateBusinessModel } from '../economics/unit_economics.js';
 import { FailureSpan, SelfHealingSessionResult } from './types.js';
 import { InvariantViolationError } from './errors.js';
+import { GitHubPRClient } from '../github/pr_client.js';
 import { config } from '../config/env.js';
 
 export class SutureLoopOrchestrator {
@@ -95,6 +96,25 @@ export class SutureLoopOrchestrator {
     console.log(`  ✓ Gross Value Created    : $${econ.grossSavingsUSD}`);
     console.log(`  ✓ Net Value per Incident : $${econ.netSavingsUSD}`);
     console.log(`  ✓ Gross Margin           : ${econ.grossMarginPercent}%`);
+
+    // 7. Automated Production Pull Request (if enabled / GITHUB_TOKEN set)
+    if (loopResult.success) {
+      try {
+        const prClient = new GitHubPRClient();
+        await prClient.createRemediationPullRequest({
+          sessionId,
+          incidentTraceId: span.traceId,
+          healedTraceId,
+          targetFile,
+          targetFunction: impact.report.targetFunction,
+          economicMetrics: econ,
+          baselineTraceUrl: evalResult.baselineTraceUrl,
+          healedTraceUrl: evalResult.healedTraceUrl
+        });
+      } catch (prErr: any) {
+        console.warn(`[GitHub Notice] ${prErr.message}`);
+      }
+    }
 
     const totalDuration = Date.now() - startTime;
     console.log(`\n✅ Session Complete in ${totalDuration}ms. Status: ${loopResult.success ? 'HEALED' : 'FAILED'}\n`);

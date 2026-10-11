@@ -1,0 +1,14 @@
+services:
+  sutureloop:
+    build: .
+    container_name: sutureloop-agent
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - NODE_ENV=production
+      - NEATLOGS_API_KEY=${NEATLOGS_API_KEY}
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - GITHUB_REPO=${GITHUB_REPO:-natureloved/SutureLoop}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+    restart: unless-stopped
