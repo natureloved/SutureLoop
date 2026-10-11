@@ -20,7 +20,10 @@ app.get('/dashboard.html', (_req: Request, res: Response) => {
   res.redirect(301, '/dashboard');
 });
 app.get('/dashboard', (_req: Request, res: Response) => {
-  res.sendFile(path.join(publicPath, 'dashboard.html'));
+  const dashPath = fs.existsSync(path.join(publicPath, 'dashboard', 'index.html'))
+    ? path.join(publicPath, 'dashboard', 'index.html')
+    : path.join(publicPath, 'dashboard.html');
+  res.sendFile(dashPath);
 });
 
 app.use(express.static(publicPath));
