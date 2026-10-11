@@ -106,8 +106,16 @@ export class TelemetryService {
    * Runs comparative evaluation between the failure baseline trace and the post-fix trace.
    */
   async runComparativeEval(baselineTraceId: string, healedTraceId: string): Promise<ComparativeEvalResult> {
-    const baselineUrl = this.traceUrlTemplate.replace('${id}', baselineTraceId);
-    const healedUrl = this.traceUrlTemplate.replace('${id}', healedTraceId);
+    const formatUrl = (tId: string) => {
+      if (this.traceUrlTemplate.includes('${id}')) {
+        return this.traceUrlTemplate.replace('${id}', tId);
+      }
+      return this.traceUrlTemplate.endsWith('/')
+        ? `${this.traceUrlTemplate}${tId}`
+        : `${this.traceUrlTemplate}/${tId}`;
+    };
+    const baselineUrl = formatUrl(baselineTraceId);
+    const healedUrl = formatUrl(healedTraceId);
 
     // If remote client is available, attempt to get real metrics
     if (this.client && typeof this.client.getTrace === 'function') {
