@@ -155,6 +155,14 @@ DEFAULT_INCIDENT_MTTR_MINUTES=45
 
 ---
 
+## 🌐 Entire Cloud Mirroring & Session Tracking
+
+- **Cloud Dashboard**: Mirrored on Entire Cloud at [`https://app.entire.io`](https://app.entire.io) (`natureloved/SutureLoop`).
+- **Autonomous Checkpoints**: Real-time agent session recording, commit linking, and AST blast-radius tree indexing via `entire enable` and Git hooks.
+
+
+---
+
 ## 📁 Repository Structure
 
 ```
