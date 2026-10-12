@@ -15,6 +15,7 @@ import { generateBusinessModel } from '../src/economics/unit_economics.js';
 import { config } from '../src/config/env.js';
 import { spawn } from 'child_process';
 import * as path from 'path';
+import * as fs from 'fs';
 
 const args = process.argv.slice(2);
 const command = args[0] || 'auto-heal';
