@@ -54,4 +54,11 @@ if [ "$FAIL" -ne 0 ]; then
   exit 1
 fi
 echo "RESULT: GREEN"
+# Keep the run logs where a human (and CI) can inspect the verification chain.
+cp "$LOGDIR"/r*.log /tmp/ 2>/dev/null || true
+for n in 1 2 3; do
+  printf 'run%s verification: ' "$n"
+  grep -hE "Verified By|Errors Delta" "/tmp/r${n}.log" 2>/dev/null | tr -d '\n' || echo "(none)"
+  echo
+done
 exit 0

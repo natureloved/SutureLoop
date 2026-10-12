@@ -48,6 +48,11 @@ export interface ComparativeEvalResult {
   status: 'VERIFIED_PASS' | 'REGRESSION_DETECTED' | 'MANUAL_VERIFICATION_REQUIRED';
   note?: string;
   error?: string;
+  /**
+   * Which layer actually produced this verdict. Reported so the demo never
+   * claims a stronger verification than it performed.
+   */
+  verifiedBy?: 'local-spans' | 'local-spans+live-replay' | 'neatlogs-cli' | 'dashboard-manual';
 }
 
 export interface PatchAttemptResult {

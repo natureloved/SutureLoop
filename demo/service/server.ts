@@ -89,23 +89,65 @@ if (config.neatlogsApiKey) {
   }
 }
 
+/**
+ * Line number of the crash site inside the sandbox file, derived from the
+ * source rather than hardcoded. The previous literal (16) pointed at the
+ * interface, not the throwing statement, so every recorded span carried the
+ * wrong coordinates and the AST blast-radius query resolved the wrong symbol.
+ */
+function resolveCrashLine(): number {
+  const billingPath = path.resolve(__dirname, 'routes/billing.ts');
+  try {
+    const lines = fs.readFileSync(billingPath, 'utf-8').split('\n');
+    const idx = lines.findIndex((l) => l.includes('customer.address.city'));
+    return idx >= 0 ? idx + 1 : 20;
+  } catch {
+    return 20;
+  }
+}
+
+/**
+ * Loads `processInvoice` from disk on every call.
+ *
+ * SutureLoop's healing loop rewrites demo/service/routes/billing.ts while this
+ * server is running. A static `import` is evaluated once and cached, so the
+ * server would keep calling the crashed function and the post-heal replay would
+ * return HTTP 500 even though the patch on disk is correct -- silently
+ * downgrading verification. A cache-busted dynamic import makes the live
+ * service observe the patched code, which is what a real hot-reload would do.
+ */
+async function loadProcessInvoice(): Promise<(invoice: any) => string> {
+  const moduleUrl = new URL(
+    `./routes/billing.js?reload=${Date.now()}`,
+    import.meta.url
+  );
+  const mod = (await import(moduleUrl.href)) as { processInvoice: (invoice: any) => string };
+  return mod.processInvoice;
+}
+
 app.post('/api/billing/invoice', async (req: Request, res: Response) => {
   const traceId = `trace_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
   const startTime = Date.now();
+  const crashLine = resolveCrashLine();
 
   try {
+    const processInvoice = await loadProcessInvoice();
     let city: string;
     if (config.neatlogsApiKey) {
-      city = await neatlogs.trace({ name: 'processInvoice', input: req.body }, async () => {
-        return processInvoice(req.body);
-      });
+      city = await neatlogs.trace(
+        { name: 'processInvoice', input: req.body },
+        async () => {
+          return processInvoice(req.body);
+        }
+      );
       await neatlogs.flush();
     } else {
       city = processInvoice(req.body);
     }
     const duration = Date.now() - startTime;
 
-    // Record success span
+    // Record the post-heal span. An empty errorMessage marks a healthy request;
+    // the comparative eval reads this to compute the before/after error delta.
     await telemetry.recordLocalFailureSpan({
       traceId,
       spanId: `span_${Date.now()}`,
@@ -114,7 +156,7 @@ app.post('/api/billing/invoice', async (req: Request, res: Response) => {
       timestamp: Date.now(),
       errorMessage: '',
       filePath: 'demo/service/routes/billing.ts',
-      lineNumber: 16
+      lineNumber: crashLine
     });
 
     res.json({
@@ -143,7 +185,7 @@ app.post('/api/billing/invoice', async (req: Request, res: Response) => {
       errorMessage: error.message,
       errorStack: error.stack,
       filePath: 'demo/service/routes/billing.ts',
-      lineNumber: 16
+      lineNumber: crashLine
     };
 
     await telemetry.recordLocalFailureSpan(failureSpan);

@@ -1,4 +1,5 @@
 import { TelemetryService } from '../telemetry/neatlogs_client.js';
+import { withHealingTrace, shutdownTracing } from '../telemetry/session_tracer.js';
 import { CheckpointManager } from '../state/checkpoint_manager.js';
 import { GitSandbox } from '../state/git_sandbox.js';
 import { analyzeBlastRadius } from '../context/blast_radius.js';
@@ -29,6 +30,34 @@ export class SutureLoopOrchestrator {
     console.log(`🩺 SutureLoop: Autonomous Self-Healing Session [${sessionId}]`);
     console.log(`======================================================`);
 
+    if (!this.telemetry.isCloudEnabled) {
+      console.log(`[Neatlogs] No NEATLOGS_API_KEY configured: spans stay local and nothing is uploaded.`);
+    }
+
+    // The whole run is one neatlogs trace so the dashboard shows the agent's
+    // reasoning chain. Tracing is fail-open: without the SDK or a key the
+    // session still runs, it just is not exported.
+    return withHealingTrace(
+      {
+        sessionId,
+        apiKey: config.neatlogsApiKey,
+        incidentTraceId: customSpan?.traceId,
+        targetFile: customSpan?.filePath,
+        targetFunction: customSpan?.name,
+        attributes: { 'sutureloop.force_fault': forceFault }
+      },
+      async () => this.runSession(sessionId, customSpan, forceFault, startTime)
+    ).finally(async () => {
+      await shutdownTracing();
+    });
+  }
+
+  private async runSession(
+    sessionId: string,
+    customSpan: FailureSpan | undefined,
+    forceFault: boolean,
+    startTime: number
+  ): Promise<SelfHealingSessionResult> {
     // 1. Ingest Failure Telemetry
     console.log(`\n[Step 1] Ingesting telemetry from neatlogs...`);
     let span = customSpan || (await this.telemetry.getLatestFailureSpan());
@@ -84,6 +113,7 @@ export class SutureLoopOrchestrator {
     // 5. Run Comparative Trace Evaluation
     console.log(`\n[Step 5] Running Comparative Trace Evaluation...`);
     let healedTraceId: string | undefined = undefined;
+    let liveReplaySucceeded = false;
 
     if (loopResult.success) {
       // Re-issue the failing request against the running service to verify real resolution
@@ -96,20 +126,28 @@ export class SutureLoopOrchestrator {
         if (replayRes.ok) {
           const replayData = (await replayRes.json()) as any;
           healedTraceId = replayData?.traceId;
+          liveReplaySucceeded = true;
           console.log(`  ✓ Live Re-issue Succeeded: Service responded 200 OK (Trace: ${healedTraceId})`);
+        } else {
+          console.warn(`  ! Live re-issue returned HTTP ${replayRes.status}; verification will be downgraded.`);
         }
       } catch {
         // Live server not running or not reachable in standalone CLI mode
+        console.warn(`  ! Live service not reachable; verification will be downgraded to telemetry-only.`);
       }
     }
 
     const evalResult = await this.telemetry.runComparativeEval(
       span.traceId,
-      healedTraceId || `trace_unverified_${Date.now()}`
+      healedTraceId || `trace_unverified_${Date.now()}`,
+      liveReplaySucceeded
     );
     console.log(`  ✓ Evaluation Mode : ${evalResult.mode}`);
     console.log(`  ✓ Baseline Trace  : ${evalResult.baselineTraceUrl}`);
     console.log(`  ✓ Healed Trace    : ${evalResult.healedTraceUrl}`);
+    if (evalResult.verifiedBy) {
+      console.log(`  ✓ Verified By     : ${evalResult.verifiedBy}`);
+    }
     if (evalResult.mode === 'PROGRAMMATIC_EVAL') {
       console.log(`  ✓ Errors Delta    : ${evalResult.baselineErrors} -> ${evalResult.healedErrors} (${evalResult.status})`);
     } else {
