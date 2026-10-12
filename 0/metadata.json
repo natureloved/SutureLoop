@@ -1,0 +1,47 @@
+{
+  "cli_version": "0.11.4",
+  "checkpoint_id": "01M4R63PBP4J5JRA7E6HM5KYSX",
+  "session_id": "494d53f8-1149-4b57-9994-6fd6d9e09ff7",
+  "strategy": "manual-commit",
+  "created_at": "2026-10-12T13:51:23.1038546Z",
+  "branch": "main",
+  "checkpoints_count": 27,
+  "save_step_count": 1,
+  "files_touched": [
+    ".github/workflows/ci.yml",
+    "demo/service/server.ts",
+    "src/core/invariants.ts",
+    "src/core/orchestrator.ts",
+    "src/github/pr_client.ts",
+    "src/state/checkpoint_manager.ts",
+    "src/synthesis/retry_controller.ts",
+    "tests/invariants.test.ts"
+  ],
+  "agent": "Antigravity",
+  "model": "",
+  "turn_id": "ff180290dcf7",
+  "session_metrics": {
+    "turn_count": 27
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-10-12T13:51:22.9048024Z",
+    "agent_lines": 0,
+    "agent_removed": 28,
+    "human_added": 213,
+    "human_modified": 467,
+    "human_removed": 0,
+    "total_committed": 550,
+    "total_lines_changed": 708,
+    "agent_percentage": 3.954802259887006,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    }
+  ]
+}
