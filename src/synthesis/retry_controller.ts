@@ -78,7 +78,7 @@ export class RetryController {
 
       let rollbackTime1 = 0;
       if (!attempt1Passed) {
-        console.log(`[RetryController] Attempt 1 was incomplete: triggering atomic rollback via Entire Checkpoint...`);
+        console.log(`[RetryController] Attempt 1 was incomplete: triggering atomic rollback via scoped checkpoint...`);
         rollbackTime1 = await this.checkpointManager.restore(initialCheckpoint, targetFile);
 
         const isClean = await this.checkpointManager.isTreePristine(targetFile);

@@ -113,8 +113,10 @@ export async function resolveAstBlastRadius(
 
     throw new Error('No focus symbol found in entire graph output');
   } catch (err: any) {
+    const reason = entirePresent ? err?.message : 'the entire CLI is not installed';
     console.warn(
-      `[Entire] 'entire graph impact' failed or returned unexpected payload: ${err.message}. Activating regex AST parser fallback...`
+      `[Entire] 'entire graph impact' unavailable (${reason}). ` +
+        `Activating the text-scan fallback -- its callers are UNVERIFIED...`
     );
     return regexAstFallback(normPath, line);
   }

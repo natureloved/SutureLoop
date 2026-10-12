@@ -20,7 +20,10 @@ export class CheckpointManager {
   async save(tag: string, targetFile?: string): Promise<string> {
     const id = `cp_${Date.now()}_${tag}`;
     const type = 'git-safety-net';
-    console.log(`[Entire] Creating scoped checkpoint: ${id} (fenced to: ${targetFile || 'workspace'})`);
+    // Labelled as what it is: an in-memory snapshot plus a git ref, scoped to
+    // the remediation target. The `[Entire]` prefix here used to imply Entire
+    // was doing the work; the `entire` CLI is not involved in checkpoints.
+    console.log(`[Checkpoint] Creating scoped snapshot: ${id} (fenced to: ${targetFile || 'workspace'})`);
 
     let fileSnapshot: string | null = null;
     if (targetFile) {
@@ -62,7 +65,7 @@ export class CheckpointManager {
       throw new CheckpointFailed(`Scoped rollback failed: target file is undefined for checkpoint '${id}'.`);
     }
 
-    console.log(`[Entire] Restoring checkpoint: ${id} (scoped strictly to: ${fileToRestore})`);
+    console.log(`[Checkpoint] Restoring snapshot: ${id} (scoped strictly to: ${fileToRestore})`);
 
     try {
       // 1. Direct in-memory snapshot restore (instant, 100% deterministic, zero side-effects to other files)
@@ -77,7 +80,7 @@ export class CheckpointManager {
     }
 
     const duration = Math.round(performance.now() - start);
-    console.log(`[Entire] Scoped rollback completed in ${duration}ms (workspace protected, zero data loss)`);
+    console.log(`[Checkpoint] Scoped rollback completed in ${duration}ms (target file only, other files untouched)`);
     return duration;
   }
 
