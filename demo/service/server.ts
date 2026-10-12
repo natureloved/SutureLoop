@@ -69,7 +69,15 @@ app.post('/api/billing/invoice', async (req: Request, res: Response) => {
   const startTime = Date.now();
 
   try {
-    const city = processInvoice(req.body);
+    let city: string;
+    if (config.neatlogsApiKey) {
+      city = await neatlogs.trace({ name: 'processInvoice', input: req.body }, async () => {
+        return processInvoice(req.body);
+      });
+      await neatlogs.flush();
+    } else {
+      city = processInvoice(req.body);
+    }
     const duration = Date.now() - startTime;
 
     // Record success span
@@ -93,6 +101,12 @@ app.post('/api/billing/invoice', async (req: Request, res: Response) => {
   } catch (error: any) {
     const duration = Date.now() - startTime;
     console.error(`[Server Error] In /api/billing/invoice: ${error.message}`);
+
+    if (config.neatlogsApiKey) {
+      try {
+        await neatlogs.flush();
+      } catch {}
+    }
 
     // Capture failure in telemetry
     const failureSpan = {

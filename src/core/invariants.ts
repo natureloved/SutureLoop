@@ -8,11 +8,14 @@ import { execSync } from 'child_process';
  */
 export function assertCleanWorktree(allowedPathsPrefix = 'demo'): void {
   try {
-    const status = execSync('git status --porcelain', { encoding: 'utf-8' }).trim();
-    if (status.length > 0) {
-      const dirtyFiles = status
+    const rawStatus = execSync('git status --porcelain', { encoding: 'utf-8' });
+    if (rawStatus.trim().length > 0) {
+      const dirtyFiles = rawStatus
         .split('\n')
-        .map(line => line.slice(3).trim())
+        .map(line => {
+          const match = line.match(/^..\s+(.*)$/);
+          return match ? match[1].trim() : '';
+        })
         .filter(Boolean);
       const nonAllowed = dirtyFiles.filter(
         f => !f.startsWith(allowedPathsPrefix) && !f.startsWith('scratch') && !f.startsWith('runs/')
