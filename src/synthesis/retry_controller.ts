@@ -52,89 +52,111 @@ export class RetryController {
     console.log(`[RetryController] Synthesizing reproduction test in demo/tests/reproduction.test.ts...`);
     TestSynthesizer.generateReproductionTest(span);
 
-    // Save baseline checkpoint before touching code
-    const initialCheckpoint = await this.checkpointManager.save('baseline-pre-heal');
-    console.log(`[RetryController] Initial state saved to checkpoint: ${initialCheckpoint}`);
+    // Save baseline checkpoint with targetFile snapshot before touching code
+    const initialCheckpoint = await this.checkpointManager.save('baseline-pre-heal', targetFile);
+    console.log(`[RetryController] Initial state saved to checkpoint: ${initialCheckpoint} (fenced to: ${targetFile})`);
 
-    // --- ATTEMPT 1: Trace-blind or forced fault ---
-    console.log(`\n================== ATTEMPT 1 ==================`);
-    console.log(`[RetryController] Attempt 1: Trace-blind synthesis (deliberate or blind)...`);
-    const patch1 = await PatchGenerator.generatePatch(targetFile, span, blastRadius, 1, forceFault);
-    totalTokenCostUSD += patch1.costUSD;
+    try {
+      // --- ATTEMPT 1: Trace-blind or forced fault ---
+      console.log(`\n================== ATTEMPT 1 ==================`);
+      console.log(`[RetryController] Attempt 1: Trace-blind synthesis (deliberate or blind)...`);
+      const patch1 = await PatchGenerator.generatePatch(targetFile, span, blastRadius, 1, forceFault);
+      totalTokenCostUSD += patch1.costUSD;
 
-    // Apply patch 1
-    fs.writeFileSync(path.resolve(targetFile), patch1.patchCode, 'utf-8');
-    console.log(`[RetryController] Applied Attempt 1 patch.`);
+      // Apply patch 1
+      fs.writeFileSync(path.resolve(targetFile), patch1.patchCode, 'utf-8');
+      console.log(`[RetryController] Applied Attempt 1 patch.`);
 
-    // Run tests
-    const test1 = await this.runTests();
-    const attempt1Passed = test1.passed;
-    console.log(`[RetryController] Attempt 1 test result: ${attempt1Passed ? 'PASSED' : 'FAILED (Expected)'}`);
+      // Run tests
+      const test1 = await this.runTests();
+      const attempt1Passed = test1.passed;
+      console.log(`[RetryController] Attempt 1 test result: ${attempt1Passed ? 'PASSED' : 'FAILED (Expected)'}`);
 
-    let rollbackTime1 = 0;
-    if (!attempt1Passed) {
-      console.log(`[RetryController] Triggering atomic rollback via Entire Checkpoint...`);
-      rollbackTime1 = await this.checkpointManager.restore(initialCheckpoint);
-      
-      const isClean = await this.checkpointManager.isTreePristine();
-      console.log(`[RetryController] Verification: Working tree pristine? ${isClean}`);
+      let rollbackTime1 = 0;
+      if (!attempt1Passed) {
+        console.log(`[RetryController] Triggering atomic rollback via Entire Checkpoint...`);
+        rollbackTime1 = await this.checkpointManager.restore(initialCheckpoint, targetFile);
+        
+        const isClean = await this.checkpointManager.isTreePristine(targetFile);
+        console.log(`[RetryController] Verification: Target file pristine? ${isClean}`);
+      }
+
+      attempts.push({
+        attempt: 1,
+        blindPrompt: true,
+        patchApplied: true,
+        testPassed: attempt1Passed,
+        rollbackOccurred: !attempt1Passed,
+        rollbackDurationMs: rollbackTime1,
+        testOutput: test1.output,
+        patchDiff: patch1.patchCode
+      });
+
+      if (attempt1Passed) {
+        console.log(`[RetryController] Attempt 1 surprisingly passed.`);
+        await this.checkpointManager.pruneAll();
+        return { attempts, totalTokenCostUSD, success: true };
+      }
+
+      // --- ATTEMPT 2: Full context + AST repair ---
+      console.log(`\n================== ATTEMPT 2 ==================`);
+      console.log(`[RetryController] Attempt 2: Full context synthesis (Stack trace + AST blast radius)...`);
+      const patch2 = await PatchGenerator.generatePatch(targetFile, span, blastRadius, 2, false);
+      totalTokenCostUSD += patch2.costUSD;
+
+      // Apply patch 2
+      fs.writeFileSync(path.resolve(targetFile), patch2.patchCode, 'utf-8');
+      console.log(`[RetryController] Applied Attempt 2 patch.`);
+
+      // Ensure reproduction test exists
+      TestSynthesizer.generateReproductionTest(span);
+
+      // Run tests again
+      const test2 = await this.runTests();
+      console.log(`[RetryController] Attempt 2 test result: ${test2.passed ? 'PASSED ✅' : 'FAILED ❌'}`);
+      if (!test2.passed) {
+        console.log(`[RetryController] Attempt 2 test failure output:\n${test2.output}`);
+      }
+
+      attempts.push({
+        attempt: 2,
+        blindPrompt: false,
+        patchApplied: true,
+        testPassed: test2.passed,
+        rollbackOccurred: false,
+        testOutput: test2.output,
+        patchDiff: patch2.patchCode
+      });
+
+      if (test2.passed) {
+        // Save healed checkpoint
+        const healedCheckpoint = await this.checkpointManager.save('healed-verified', targetFile);
+        console.log(`[RetryController] Healed state captured as checkpoint: ${healedCheckpoint}`);
+        await this.checkpointManager.pruneAll();
+        return { attempts, totalTokenCostUSD, success: true };
+      }
+
+      // If still failed, rollback accurately to baseline state
+      console.log(`[RetryController] Attempt 2 failed: rolling back to baseline state...`);
+      await this.checkpointManager.restore(initialCheckpoint, targetFile);
+      await this.checkpointManager.pruneAll();
+      return { attempts, totalTokenCostUSD, success: false };
+    } catch (err: any) {
+      // Guarantee rollback on unhandled synthesis exceptions
+      console.error(`[RetryController] Unhandled error during healing: ${err.message}. Performing emergency rollback...`);
+      try {
+        await this.checkpointManager.restore(initialCheckpoint, targetFile);
+      } catch (restoreErr: any) {
+        console.error(`[Emergency Rollback Error] ${restoreErr.message}`);
+      }
+      await this.checkpointManager.pruneAll();
+      throw err;
+    } finally {
+      // Clean up ephemeral reproduction test if present
+      const reproTestPath = path.resolve('demo/tests/reproduction.test.ts');
+      if (fs.existsSync(reproTestPath)) {
+        try { fs.unlinkSync(reproTestPath); } catch {}
+      }
     }
-
-    attempts.push({
-      attempt: 1,
-      blindPrompt: true,
-      patchApplied: true,
-      testPassed: attempt1Passed,
-      rollbackOccurred: !attempt1Passed,
-      rollbackDurationMs: rollbackTime1,
-      testOutput: test1.output,
-      patchDiff: patch1.patchCode
-    });
-
-    if (attempt1Passed) {
-      console.log(`[RetryController] Attempt 1 surprisingly passed.`);
-      return { attempts, totalTokenCostUSD, success: true };
-    }
-
-    // --- ATTEMPT 2: Full context + AST repair ---
-    console.log(`\n================== ATTEMPT 2 ==================`);
-    console.log(`[RetryController] Attempt 2: Full context synthesis (Stack trace + AST blast radius)...`);
-    const patch2 = await PatchGenerator.generatePatch(targetFile, span, blastRadius, 2, false);
-    totalTokenCostUSD += patch2.costUSD;
-
-    // Apply patch 2
-    fs.writeFileSync(path.resolve(targetFile), patch2.patchCode, 'utf-8');
-    console.log(`[RetryController] Applied Attempt 2 patch.`);
-
-    // Ensure reproduction test exists
-    TestSynthesizer.generateReproductionTest(span);
-
-    // Run tests again
-    const test2 = await this.runTests();
-    console.log(`[RetryController] Attempt 2 test result: ${test2.passed ? 'PASSED ✅' : 'FAILED ❌'}`);
-    if (!test2.passed) {
-      console.log(`[RetryController] Attempt 2 test failure output:\n${test2.output}`);
-    }
-
-    attempts.push({
-      attempt: 2,
-      blindPrompt: false,
-      patchApplied: true,
-      testPassed: test2.passed,
-      rollbackOccurred: false,
-      testOutput: test2.output,
-      patchDiff: patch2.patchCode
-    });
-
-    if (test2.passed) {
-      // Save healed checkpoint
-      const healedCheckpoint = await this.checkpointManager.save('healed-verified');
-      console.log(`[RetryController] Healed state captured as checkpoint: ${healedCheckpoint}`);
-      return { attempts, totalTokenCostUSD, success: true };
-    }
-
-    // If still failed, rollback
-    await this.checkpointManager.restore(initialCheckpoint);
-    return { attempts, totalTokenCostUSD, success: false };
   }
 }

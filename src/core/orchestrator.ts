@@ -6,7 +6,7 @@ import { RetryController } from '../synthesis/retry_controller.js';
 import { calculateIncidentEconomics, generateBusinessModel } from '../economics/unit_economics.js';
 import { FailureSpan, SelfHealingSessionResult } from './types.js';
 import { InvariantViolationError } from './errors.js';
-import { assertValidTargetFile, assertMeasuredMetric } from './invariants.js';
+import { assertValidTargetFile, assertMeasuredMetric, assertCleanWorktree } from './invariants.js';
 import { GitHubPRClient } from '../github/pr_client.js';
 import { config } from '../config/env.js';
 
@@ -42,20 +42,23 @@ export class SutureLoopOrchestrator {
     console.log(`    - Error    : ${span.errorMessage}`);
     console.log(`    - Location : ${span.filePath}:${span.lineNumber}`);
 
-    const targetFile = span.filePath || 'demo/service/routes/billing.ts';
-    const targetLine = span.lineNumber || 16;
+    if (!span.filePath || typeof span.filePath !== 'string' || span.filePath.trim() === '') {
+      throw new InvariantViolationError('Failure span is missing required filePath property.');
+    }
+    if (!span.lineNumber || typeof span.lineNumber !== 'number' || span.lineNumber <= 0) {
+      throw new InvariantViolationError('Failure span is missing required positive lineNumber property.');
+    }
 
-    // Validate target file against boundary traversal and injection
+    const targetFile = span.filePath;
+    const targetLine = span.lineNumber;
+
+    // Validate target file against boundary traversal, injection, and self-mutation
     assertValidTargetFile(targetFile);
 
     // 2. Pre-flight Check: Ensure Worktree is Pristine
     console.log(`\n[Step 2] Verifying Git worktree cleanliness...`);
-    const isPristine = await GitSandbox.isPristine('demo');
-    if (!isPristine) {
-      console.warn(`  ⚠ Warning: Workspace has uncommitted changes. Proceeding within demo/ sandbox.`);
-    } else {
-      console.log(`  ✓ Worktree is verified clean.`);
-    }
+    assertCleanWorktree('demo');
+    console.log(`  ✓ Worktree is verified clean.`);
 
     // 3. Resolve AST Blast Radius using Entire Graph
     console.log(`\n[Step 3] Analyzing AST Blast Radius with Entire Graph...`);
@@ -78,26 +81,37 @@ export class SutureLoopOrchestrator {
 
     // 5. Run Comparative Trace Evaluation
     console.log(`\n[Step 5] Running Comparative Trace Evaluation...`);
-    const healedTraceId = `trace_healed_${Date.now()}`;
+    let healedTraceId: string | undefined = undefined;
+
     if (loopResult.success) {
-      // Record real post-heal telemetry span with 0 errors
-      await this.telemetry.recordLocalFailureSpan({
-        traceId: healedTraceId,
-        spanId: `span_healed_${Date.now()}`,
-        name: impact.report.targetFunction || 'processInvoice',
-        service: span.service || 'billing-service',
-        timestamp: Date.now(),
-        errorMessage: '',
-        filePath: targetFile,
-        lineNumber: targetLine
-      });
+      // Re-issue the failing request against the running service to verify real resolution
+      try {
+        const replayRes = await fetch(`http://localhost:${config.port}/api/billing/invoice`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(span.rawAttributes?.payload || {})
+        });
+        if (replayRes.ok) {
+          const replayData = (await replayRes.json()) as any;
+          healedTraceId = replayData?.traceId;
+          console.log(`  ✓ Live Re-issue Succeeded: Service responded 200 OK (Trace: ${healedTraceId})`);
+        }
+      } catch {
+        // Live server not running or not reachable in standalone CLI mode
+      }
     }
-    const evalResult = await this.telemetry.runComparativeEval(span.traceId, healedTraceId);
+
+    const evalResult = await this.telemetry.runComparativeEval(
+      span.traceId,
+      healedTraceId || `trace_unverified_${Date.now()}`
+    );
     console.log(`  ✓ Evaluation Mode : ${evalResult.mode}`);
     console.log(`  ✓ Baseline Trace  : ${evalResult.baselineTraceUrl}`);
     console.log(`  ✓ Healed Trace    : ${evalResult.healedTraceUrl}`);
     if (evalResult.mode === 'PROGRAMMATIC_EVAL') {
       console.log(`  ✓ Errors Delta    : ${evalResult.baselineErrors} -> ${evalResult.healedErrors} (${evalResult.status})`);
+    } else {
+      console.log(`  ✓ Status          : ${evalResult.status} (${evalResult.note || 'Manual camera inspection'})`);
     }
 
     // 6. Calculate Unit Economics

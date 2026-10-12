@@ -12,11 +12,22 @@ describe('Invariants & Security Guards', () => {
     expect(() => assertValidTargetFile('demo/non_existent.ts')).toThrow(InvariantViolationError);
   });
 
-  it('should reject command injection sequences in file paths', () => {
-    expect(() => assertValidTargetFile('billing.ts; touch /tmp/PWNED')).toThrow(InvariantViolationError);
-    expect(() => assertValidTargetFile('billing.ts && rm -rf /')).toThrow(InvariantViolationError);
-    expect(() => assertValidTargetFile('billing.ts | cat /etc/passwd')).toThrow(InvariantViolationError);
-    expect(() => assertValidTargetFile('billing.ts`id`')).toThrow(InvariantViolationError);
+  it('should strictly prohibit self-mutation of agent internal source files', () => {
+    // Attempting to target orchestrator or internal engine must be blocked with InvariantViolationError
+    expect(() => assertValidTargetFile('src/core/orchestrator.ts')).toThrow(InvariantViolationError);
+    expect(() => assertValidTargetFile('src/state/checkpoint_manager.ts')).toThrow(InvariantViolationError);
+    expect(() => assertValidTargetFile('bin/sutureloop.ts')).toThrow(InvariantViolationError);
+    expect(() => assertValidTargetFile('.github/workflows/ci.yml')).toThrow(InvariantViolationError);
+  });
+
+  it('should strictly prohibit targeting root configuration files', () => {
+    expect(() => assertValidTargetFile('package.json')).toThrow(InvariantViolationError);
+    expect(() => assertValidTargetFile('tsconfig.json')).toThrow(InvariantViolationError);
+  });
+
+  it('should reject directory traversal and null byte sequences', () => {
+    expect(() => assertValidTargetFile('../outside.ts')).toThrow(InvariantViolationError);
+    expect(() => assertValidTargetFile('demo/service/\0routes/billing.ts')).toThrow(InvariantViolationError);
   });
 
   it('should validate measured metrics', () => {

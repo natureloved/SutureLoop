@@ -15,10 +15,12 @@ interface ExtendedCheckpointInfo extends CheckpointInfo {
 export class CheckpointManager {
   private checkpoints: Map<string, ExtendedCheckpointInfo> = new Map();
 
+  private activeBranches: Set<string> = new Set();
+
   async save(tag: string, targetFile?: string): Promise<string> {
     const id = `cp_${Date.now()}_${tag}`;
     const type = 'git-safety-net';
-    console.log(`[Entire] Creating scoped checkpoint: ${id} (fenced to target file)`);
+    console.log(`[Entire] Creating scoped checkpoint: ${id} (fenced to: ${targetFile || 'workspace'})`);
 
     let fileSnapshot: string | null = null;
     if (targetFile) {
@@ -29,8 +31,11 @@ export class CheckpointManager {
     }
 
     try {
-      // Create local git checkpoint ref for safety net without touching other worktree files
+      // Store as git ref under refs/sutureloop/cp/* so it never pollutes the user's branch list
+      await execFileAsync('git', ['update-ref', `refs/sutureloop/checkpoints/${id}`, 'HEAD']);
+      // Also maintain ephemeral branch if git checkout by branch name is needed
       await execFileAsync('git', ['branch', '-f', id, 'HEAD']);
+      this.activeBranches.add(id);
     } catch (gitErr: any) {
       console.warn(`[Checkpoint Warning] Git ref creation notice: ${gitErr.message}`);
     }
@@ -53,18 +58,19 @@ export class CheckpointManager {
     const info = this.checkpoints.get(id);
     const fileToRestore = targetFile || info?.targetFile;
 
-    console.log(`[Entire] Restoring checkpoint: ${id} (scoped to: ${fileToRestore || 'fenced files'})`);
+    if (!fileToRestore) {
+      throw new CheckpointFailed(`Scoped rollback failed: target file is undefined for checkpoint '${id}'.`);
+    }
+
+    console.log(`[Entire] Restoring checkpoint: ${id} (scoped strictly to: ${fileToRestore})`);
 
     try {
-      // 1. Direct in-memory snapshot restore (instant, zero side-effects to other workspace files)
-      if (fileToRestore && info?.fileSnapshot !== undefined && info.fileSnapshot !== null) {
+      // 1. Direct in-memory snapshot restore (instant, 100% deterministic, zero side-effects to other files)
+      if (info?.fileSnapshot !== undefined && info.fileSnapshot !== null) {
         fs.writeFileSync(path.resolve(fileToRestore), info.fileSnapshot, 'utf-8');
-      } else if (fileToRestore) {
-        // 2. Scoped git checkout of only the specific target file from the checkpoint branch
-        await execFileAsync('git', ['checkout', id, '--', fileToRestore]);
       } else {
-        // Fallback: restore demo files only, never repo-wide root
-        await execFileAsync('git', ['checkout', id, '--', 'demo/service/routes/billing.ts']);
+        // 2. Scoped git checkout of only the specific target file from the checkpoint ref
+        await execFileAsync('git', ['checkout', `refs/sutureloop/checkpoints/${id}`, '--', fileToRestore]);
       }
     } catch (err: any) {
       throw new CheckpointFailed(`Scoped rollback failed: ${err.message}`);
@@ -79,9 +85,31 @@ export class CheckpointManager {
     try {
       await execFileAsync('git', ['branch', '-D', id]);
     } catch {
-      // Ignore if branch was already pruned
+      // Branch might not exist or already pruned
     }
+    try {
+      await execFileAsync('git', ['update-ref', '-d', `refs/sutureloop/checkpoints/${id}`]);
+    } catch {
+      // Ref might already be deleted
+    }
+    this.activeBranches.delete(id);
     this.checkpoints.delete(id);
+  }
+
+  async pruneAll(): Promise<void> {
+    for (const id of Array.from(this.activeBranches)) {
+      await this.cleanup(id);
+    }
+    // Also delete any dangling cp_* branches in git
+    try {
+      const { stdout } = await execFileAsync('git', ['branch', '--list', 'cp_*']);
+      const branches = stdout.split('\n').map(b => b.trim().replace(/^\*\s*/, '')).filter(Boolean);
+      for (const b of branches) {
+        try {
+          await execFileAsync('git', ['branch', '-D', b]);
+        } catch {}
+      }
+    } catch {}
   }
 
   async isTreePristine(targetFile?: string): Promise<boolean> {

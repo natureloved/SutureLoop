@@ -1,7 +1,7 @@
-import { exec } from 'child_process';
+import { execFile } from 'child_process';
 import { promisify } from 'util';
 
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 export interface PullRequestPayload {
   sessionId: string;
@@ -48,11 +48,17 @@ export class GitHubPRClient {
 
     try {
       console.log(`[GitHub] Checking out remediation branch: ${branch}...`);
-      await execAsync(`git checkout -b ${branch}`);
+      await execFileAsync('git', ['checkout', '-b', branch]);
       // Scope addition STRICTLY to the remediated target file, never repo-wide add -A
-      await execAsync(`git add ${payload.targetFile}`);
-      await execAsync(`git -c core.hooksPath="" commit -m "fix(sutureloop): autonomous verified remediation for ${payload.incidentTraceId}"`);
-      await execAsync(`git -c core.hooksPath="" push origin ${branch}`);
+      await execFileAsync('git', ['add', '--', payload.targetFile]);
+      await execFileAsync('git', [
+        '-c',
+        'core.hooksPath=',
+        'commit',
+        '-m',
+        `fix(sutureloop): autonomous verified remediation for ${payload.incidentTraceId}`
+      ]);
+      await execFileAsync('git', ['-c', 'core.hooksPath=', 'push', 'origin', branch]);
 
       const title = `🩺 SutureLoop: Autonomous Verified Fix for ${payload.targetFunction}() [${payload.sessionId}]`;
       const body = `## 🩺 SutureLoop Autonomous Remediation Summary

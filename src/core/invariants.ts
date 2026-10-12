@@ -10,8 +10,13 @@ export function assertCleanWorktree(allowedPathsPrefix = 'demo'): void {
   try {
     const status = execSync('git status --porcelain', { encoding: 'utf-8' }).trim();
     if (status.length > 0) {
-      const dirtyFiles = status.split('\n').map(line => line.trim().substring(3));
-      const nonAllowed = dirtyFiles.filter(f => !f.startsWith(allowedPathsPrefix) && !f.startsWith('scratch'));
+      const dirtyFiles = status
+        .split('\n')
+        .map(line => line.slice(3).trim())
+        .filter(Boolean);
+      const nonAllowed = dirtyFiles.filter(
+        f => !f.startsWith(allowedPathsPrefix) && !f.startsWith('scratch') && !f.startsWith('runs/')
+      );
       if (nonAllowed.length > 0) {
         throw new InvariantViolationError(
           `Worktree has uncommitted changes outside sandbox: ${nonAllowed.join(', ')}`
@@ -28,28 +33,73 @@ export function assertCleanWorktree(allowedPathsPrefix = 'demo'): void {
 }
 
 /**
- * Validates that the target file exists, is inside the allowed workspace/demo boundary,
- * and contains valid contents.
+ * Validates that the target file exists, is inside the allowed application boundary,
+ * and strictly prevents self-mutation of the agent's own core code or configuration.
  */
-export function assertValidTargetFile(filePath: string): void {
+export function assertValidTargetFile(filePath: string, allowedPrefixes = ['demo/service', 'demo']): void {
   if (!filePath || filePath.trim() === '') {
     throw new InvariantViolationError('Target file path cannot be empty.');
   }
 
-  // Prevent shell metacharacters and command injection
-  if (/[\0\r\n;&|`$(){}<>"'\\]/.test(filePath) && !filePath.includes(':\\')) {
-    throw new InvariantViolationError(`Malicious characters detected in target file path: ${filePath}`);
+  // Prevent null bytes and control characters
+  if (/[\0\r\n]/.test(filePath)) {
+    throw new InvariantViolationError(`Malicious control characters detected in target file path: ${filePath}`);
   }
 
+  const workspaceRoot = path.resolve(process.cwd());
   const resolved = path.resolve(filePath);
+
+  // Must be strictly within workspace root
+  const rel = path.relative(workspaceRoot, resolved);
+  if (rel.startsWith('..') || path.isAbsolute(rel)) {
+    throw new InvariantViolationError(`Target file is outside the workspace root boundary: ${filePath}`);
+  }
+
+  // Normalize path separators to forward slash for boundary checks
+  const normalizedRel = rel.replace(/\\/g, '/');
+
+  // CRITICAL SECURITY GUARD: Autonomous self-healing cannot mutate the agent's own source, CLI, or config
+  const forbiddenPrefixes = [
+    'src/',
+    'bin/',
+    'tests/',
+    'node_modules/',
+    '.git/',
+    '.entire/',
+    '.agents/',
+    '.claude/',
+    '.cursor/',
+    '.github/',
+    '.factory/',
+    '.codex/',
+    '.gemini/',
+    '.opencode/',
+    '.pi/'
+  ];
+
+  for (const forbidden of forbiddenPrefixes) {
+    if (normalizedRel.toLowerCase().startsWith(forbidden.toLowerCase())) {
+      throw new InvariantViolationError(
+        `Security boundary violation: Autonomous remediation cannot mutate agent core internal source or configuration ('${forbidden}'): ${filePath}`
+      );
+    }
+  }
+
+  // Prohibit root-level configuration files (e.g. package.json, tsconfig.json)
+  if (!normalizedRel.includes('/')) {
+    throw new InvariantViolationError(`Security boundary violation: Cannot target root workspace files: ${filePath}`);
+  }
+
+  // Ensure target is within designated application boundary
+  const isAllowed = allowedPrefixes.some(prefix => normalizedRel.startsWith(prefix));
+  if (!isAllowed) {
+    throw new InvariantViolationError(
+      `Target file '${filePath}' is not within permitted remediation application roots: [${allowedPrefixes.join(', ')}]`
+    );
+  }
+
   if (!fs.existsSync(resolved)) {
     throw new InvariantViolationError(`Target file does not exist on disk: ${filePath}`);
-  }
-
-  // Bound strictly to workspace root
-  const workspaceRoot = process.cwd();
-  if (!resolved.toLowerCase().startsWith(workspaceRoot.toLowerCase())) {
-    throw new InvariantViolationError(`Target file is outside the workspace root boundary: ${filePath}`);
   }
 }
 

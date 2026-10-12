@@ -1,10 +1,11 @@
-import express, { Request, Response } from 'express';
+import express, { Request, Response, NextFunction } from 'express';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { handleInvoiceBilling, processInvoice } from './routes/billing.js';
 import { TelemetryService } from '../../src/telemetry/neatlogs_client.js';
 import { SutureLoopOrchestrator } from '../../src/core/orchestrator.js';
+import { assertValidTargetFile } from '../../src/core/invariants.js';
 import * as neatlogs from 'neatlogs';
 import { config } from '../../src/config/env.js';
 
@@ -14,6 +15,26 @@ const publicPath = path.resolve(__dirname, '../../public');
 
 const app = express();
 app.use(express.json());
+
+function requireWebhookAuth(req: Request, res: Response, next: NextFunction): void {
+  const configuredSecret = process.env.SUTURELOOP_WEBHOOK_SECRET || process.env.API_SECRET;
+  if (!configuredSecret) {
+    // If no secret configured in environment, allow local loopback calls only for security
+    const ip = req.ip || req.socket.remoteAddress || '';
+    const isLocal = ip.includes('127.0.0.1') || ip === '::1' || ip.includes('localhost') || ip.includes('::ffff:127.0.0.1');
+    if (isLocal) {
+      return next();
+    }
+    res.status(401).json({ error: 'Unauthorized: SUTURELOOP_WEBHOOK_SECRET required for remote access.' });
+    return;
+  }
+  const authHeader = req.headers['authorization'] || req.headers['x-sutureloop-secret'];
+  const token = Array.isArray(authHeader) ? authHeader[0] : authHeader;
+  if (token === configuredSecret || token === `Bearer ${configuredSecret}`) {
+    return next();
+  }
+  res.status(401).json({ error: 'Unauthorized: Invalid authentication credentials.' });
+}
 
 // Canonical clean URL routing
 app.get('/dashboard.html', (_req: Request, res: Response) => {
@@ -111,13 +132,29 @@ app.get('/api/dashboard/stats', (_req: Request, res: Response) => {
   const isPatched = billingContent.includes('??') || billingContent.includes('?.');
 
   // Dynamic measured metrics from the actual healing run
-  const measuredMttr = latestSessionResult ? Number((latestSessionResult.durationMs / 1000).toFixed(2)) : 3.43;
-  const measuredRollback = latestSessionResult?.attempts?.find((a: any) => a.rollbackOccurred)?.rollbackDurationMs || 14;
-  const measuredCost = latestSessionResult?.economicMetrics?.measuredTokenCostUSD || 0.0011;
-  const measuredMargin = latestSessionResult?.economicMetrics?.grossMarginPercent || 99.9;
-  const blastRadiusPct = latestSessionResult?.blastRadius?.callers?.length
-    ? Number(((latestSessionResult.blastRadius.callers.length / 653) * 100).toFixed(2))
-    : 0.46;
+  const measuredMttr = latestSessionResult ? Number((latestSessionResult.durationMs / 1000).toFixed(2)) : 0;
+  const measuredRollback = latestSessionResult?.attempts?.find((a: any) => a.rollbackOccurred)?.rollbackDurationMs || 0;
+  const measuredCost = latestSessionResult?.economicMetrics?.measuredTokenCostUSD || 0;
+  const measuredMargin = latestSessionResult?.economicMetrics?.grossMarginPercent || 0;
+
+  // Dynamic blast radius calculation based on callers
+  const callerCount = latestSessionResult?.blastRadius?.callers?.length || 0;
+  const declaredFunctions = (billingContent.match(/function\s+\w+/g) || []).length || 2;
+  const blastRadiusPct = latestSessionResult
+    ? Number(((callerCount / Math.max(declaredFunctions, 1)) * 100).toFixed(2))
+    : 0;
+
+  const incidents = latestSessionResult ? [
+    {
+      id: latestSessionResult.sessionId || 'INC-LIVE',
+      service: 'billing-service',
+      target: `${latestSessionResult.targetFile}:${latestSessionResult.blastRadius?.targetLine || 16}`,
+      status: isPatched ? 'VERIFIED HEALED' : 'CRASH PENDING',
+      duration: `${measuredMttr}s`,
+      costUSD: measuredCost,
+      rollbackOccurred: Boolean(latestSessionResult?.attempts?.some((a: any) => a.rollbackOccurred))
+    }
+  ] : [];
 
   res.json({
     status: 'ok',
@@ -126,17 +163,7 @@ app.get('/api/dashboard/stats', (_req: Request, res: Response) => {
     state: isPatched ? 'HEALTHY_PATCHED' : 'SEEDED_CRASH_ACTIVE',
     spansCount: spans.length,
     recentSpans: spans.slice(-5).reverse(),
-    incidents: [
-      {
-        id: 'INC-8644',
-        service: 'billing-service',
-        target: 'demo/service/routes/billing.ts:20',
-        status: isPatched ? 'VERIFIED HEALED' : 'CRASH PENDING',
-        duration: `${measuredMttr}s`,
-        costUSD: measuredCost,
-        rollbackOccurred: true
-      }
-    ],
+    incidents,
     kpis: {
       medianMttrSec: measuredMttr,
       blastRadiusPct,
@@ -147,7 +174,7 @@ app.get('/api/dashboard/stats', (_req: Request, res: Response) => {
   });
 });
 
-app.post('/api/demo/trigger-crash', async (_req: Request, res: Response) => {
+app.post('/api/demo/trigger-crash', requireWebhookAuth, async (_req: Request, res: Response) => {
   const billingPath = path.resolve(__dirname, 'routes/billing.ts');
   const crashLineCode = `export interface InvoiceRequest {
   id?: string;
@@ -207,14 +234,14 @@ export function handleInvoiceBilling(req: any, res: any): void {
   });
 });
 
-app.post('/api/demo/trigger-heal', async (_req: Request, res: Response) => {
+app.post('/api/demo/trigger-heal', requireWebhookAuth, async (_req: Request, res: Response) => {
   try {
     const orchestrator = new SutureLoopOrchestrator();
     const result = await orchestrator.run(undefined, false);
     latestSessionResult = result;
     res.json({
       success: true,
-      incidentId: 'INC-8644',
+      incidentId: result.sessionId,
       status: result.finalStatus,
       durationMs: result.durationMs,
       economicMetrics: result.economicMetrics,
@@ -228,7 +255,7 @@ app.post('/api/demo/trigger-heal', async (_req: Request, res: Response) => {
   }
 });
 
-app.post('/api/demo/reset-baseline', (_req: Request, res: Response) => {
+app.post('/api/demo/reset-baseline', requireWebhookAuth, (_req: Request, res: Response) => {
   const billingPath = path.resolve(__dirname, 'routes/billing.ts');
   const baselineCode = `export interface InvoiceRequest {
   id?: string;
@@ -270,21 +297,47 @@ export function handleInvoiceBilling(req: any, res: any): void {
 /**
  * Universal Inbound Crash Webhook for Production Services:
  * Receives runtime crashes from external microservices / Neatlogs webhooks / Sentry alerts,
- * records telemetry, and triggers SutureLoop autonomous remediation!
+ * validates boundaries, and triggers SutureLoop autonomous remediation!
  */
-app.post('/api/v1/incidents/ingest', async (req: Request, res: Response) => {
+app.post('/api/v1/incidents/ingest', requireWebhookAuth, async (req: Request, res: Response) => {
   const { service, errorMessage, errorStack, filePath, lineNumber, traceId: incomingTraceId } = req.body;
+
+  if (!filePath || typeof filePath !== 'string' || filePath.trim() === '') {
+    res.status(400).json({
+      accepted: false,
+      error: 'Validation failed: filePath must be provided as a non-empty string.'
+    });
+    return;
+  }
+  if (!lineNumber || typeof lineNumber !== 'number' || lineNumber <= 0) {
+    res.status(400).json({
+      accepted: false,
+      error: 'Validation failed: lineNumber must be provided as a positive integer.'
+    });
+    return;
+  }
+
+  try {
+    assertValidTargetFile(filePath);
+  } catch (err: any) {
+    res.status(403).json({
+      accepted: false,
+      error: `Security boundary violation: ${err.message}`
+    });
+    return;
+  }
+
   const traceId = incomingTraceId || `trace_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
   const span = {
     traceId,
     spanId: `span_${Date.now()}`,
     name: 'runtimeException',
-    service: service || 'unknown-service',
+    service: service || 'billing-service',
     timestamp: Date.now(),
     errorMessage: errorMessage || 'Unhandled Runtime Error',
     errorStack: errorStack || '',
-    filePath: filePath || 'demo/service/routes/billing.ts',
-    lineNumber: lineNumber || 20
+    filePath,
+    lineNumber
   };
 
   await telemetry.recordLocalFailureSpan(span);
@@ -303,6 +356,7 @@ app.post('/api/v1/incidents/ingest', async (req: Request, res: Response) => {
     try {
       const orchestrator = new SutureLoopOrchestrator();
       const result = await orchestrator.run(span, false);
+      latestSessionResult = result;
       console.log(`[Ingest Webhook] Autonomous healing finished for ${traceId}: Status ${result.finalStatus}`);
     } catch (err: any) {
       console.error(`[Ingest Webhook Error] Remediation failed for ${traceId}: ${err.message}`);
