@@ -100,6 +100,12 @@ export class SutureLoopOrchestrator {
       console.log(`    - ${c.filePath}:${c.lineNumber} (${c.functionName})`);
     });
     console.log(`  ✓ Resolution Method: ${impact.report.resolvedVia}`);
+    if (impact.report.resolvedVia !== 'entire-graph') {
+      console.warn(
+        `  ! Callers above are UNVERIFIED (lexical scan, not an AST call graph). ` +
+          `Install the 'entire' CLI for verified resolution.`
+      );
+    }
 
     // 4. Save Base Checkpoint & Execute Bounded Healing Loop
     console.log(`\n[Step 4] Starting Bounded Retry & Rollback Loop...`);
@@ -107,7 +113,8 @@ export class SutureLoopOrchestrator {
       targetFile,
       span,
       impact.report,
-      forceFault
+      forceFault,
+      config.retryLimit
     );
 
     // 5. Run Comparative Trace Evaluation

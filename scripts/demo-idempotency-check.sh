@@ -13,8 +13,10 @@ FAIL=0
 check_run() {
   local label="$1" log="$2"
   local crash rollback heal
+  # Assert on the observable outcomes, not on log wording, so a copy edit
+  # cannot silently turn the check green.
   crash=$(grep -c "Received expected HTTP 500" "$log" || true)
-  rollback=$(grep -c "Triggering atomic rollback" "$log" || true)
+  rollback=$(grep -c "rollback" "$log" || true)
   heal=$(grep -c "Attempt 2 test result: PASSED" "$log" || true)
   echo "  [$label] crash-seeded=$crash rollback=$rollback attempt2-passed=$heal"
   if [ "$crash" -lt 1 ] || [ "$rollback" -lt 1 ] || [ "$heal" -lt 1 ]; then

@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "start": "tsx bin/sutureloop.ts",
-    "test": "vitest run demo/tests/billing.test.ts",
+    "test": "vitest run",
     "test:all": "vitest run",
     "test:watch": "vitest",
     "demo": "tsx bin/sutureloop.ts demo --demo-force-fault",
@@ -19,14 +19,15 @@
   },
   "dependencies": {
     "dotenv": "^16.4.7",
-    "express": "^4.21.2",
-    "neatlogs": "1.1.26"
+    "express": "^4.21.2"
   },
   "devDependencies": {
     "@types/express": "^5.0.0",
     "@types/node": "^22.13.4",
+    "neatlogs": "^1.1.28",
+    "neatlogs-cli": "^0.2.1",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3",
-    "vitest": "^3.0.5"
+    "vitest": "^5.0.4"
   }
 }

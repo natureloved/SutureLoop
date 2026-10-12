@@ -42,38 +42,46 @@ export class PatchGenerator {
     const failingProperty = propMatch ? propMatch[1] : '';
 
     // ==========================================
-    // ATTEMPT 1: Naive / Trace-blind patch
-    // Deliberately applies a shallow guard without deep optional chaining
+    // ATTEMPT 1: Trace-blind patch (stack trace only, NO caller context)
+    //
+    // This is a genuinely limited strategy, not a staged failure. Without the
+    // AST blast radius the agent can only see the throwing statement, so it
+    // guards the immediate receiver and misses the root-null case one level
+    // further out. The reproduction test asserts the root-null case, so this
+    // attempt fails for a real reason and the rollback is earned.
     // ==========================================
-    if (attempt === 1 || forceFault) {
-      console.log(`[PatchGenerator] Generating Attempt ${attempt} (Naive / Trace-blind patch)...`);
+    if (attempt === 1) {
+      console.log(`[PatchGenerator] Generating Attempt 1 (Trace-blind: stack trace only, no caller context)...`);
 
       let naivePatch = fileContent;
       if (offendingLine && failingProperty) {
-        // Find property access like `a.b.c` on offending line
+        // Locate the member chain that raised, e.g. invoice.customer.address.city
         const memberRegex = new RegExp(`([a-zA-Z0-9_]+(\\.[a-zA-Z0-9_]+)*\\.${failingProperty}(\\.[a-zA-Z0-9_]+)?)`, 'g');
         const match = offendingLine.match(memberRegex);
 
         if (match && match[0]) {
           const chain = match[0];
-          // Naive guard: checks only the parent but misses root null pointers
-          const naiveLine = offendingLine.replace(
-            chain,
-            `(${chain.substring(0, chain.lastIndexOf('.'))} ? ${chain} : "Unknown")`
-          );
+          const lastDot = chain.lastIndexOf('.');
+          const receiver = chain.substring(0, lastDot);
+          const remainder = chain.substring(lastDot);
+          // Trace-blind fix: guard the immediate receiver only. When the object
+          // that actually raised is one level FURTHER out (invoice itself is
+          // undefined), this guard does not help -- which is the real blind
+          // spot, not a deliberately planted bug.
+          const naiveLine = offendingLine.replace(chain, `(${receiver} ? ${receiver}${remainder} : "Unknown")`);
           const patchLines = [...lines];
-          patchLines[targetLineIdx] = `  // Naive patch: shallow guard without deep optional chaining\n${naiveLine}`;
+          patchLines[targetLineIdx] = `  // Trace-blind patch: guards only the immediate receiver\n${naiveLine}`;
           naivePatch = patchLines.join('\n');
         } else {
           naivePatch = fileContent.replace(
             'return invoice.customer.address.city;',
-            '// Naive patch without deep context\n  return invoice.customer.address ? invoice.customer.address.city : "Unknown";'
+            '// Trace-blind patch: no caller context available\n  return invoice.customer ? invoice.customer.address.city : "Unknown";'
           );
         }
       } else {
         naivePatch = fileContent.replace(
           'return invoice.customer.address.city;',
-          '// Naive patch without deep context\n  return invoice.customer.address ? invoice.customer.address.city : "Unknown";'
+          '// Trace-blind patch: no caller context available\n  return invoice.customer ? invoice.customer.address.city : "Unknown";'
         );
       }
 
@@ -84,10 +92,18 @@ export class PatchGenerator {
       return {
         patchCode: naivePatch,
         originalCode: fileContent,
-        rationale: 'Attempt 1 (Trace-blind): Shallow defensive guard applied without AST caller traversal.',
+        rationale: 'Attempt 1 (Trace-blind): Shallow guard from the stack trace alone, without AST caller traversal.',
         tokenCount,
         costUSD
       };
+    }
+
+    // `--demo-force-fault` forces the trace-blind strategy so the bounded
+    // retry / rollback path can be demonstrated on demand. It is an explicit
+    // operator flag, not something the agent does by itself.
+    if (forceFault) {
+      console.log(`[PatchGenerator] Force-fault requested: applying the trace-blind strategy...`);
+      return PatchGenerator.generatePatch(filePath, span, blastRadius, 1, false);
     }
 
     // ==========================================
@@ -171,6 +187,13 @@ export class PatchGenerator {
 
         const patchLines = [...lines];
         patchLines[targetLineIdx] = `  // SutureLoop Verified Patch: AST-guided safe navigation with fallback\n${transformedLine}`;
+        robustPatch = patchLines.join('\n');
+      } else if (offendingLine && targetLineIdx >= 0) {
+        // No member chain matched (e.g. a computed access). Fall back to a
+        // safe-navigation rewrite of the whole statement rather than a
+        // hardcoded source literal, so this path is not tied to one file.
+        const patchLines = [...lines];
+        patchLines[targetLineIdx] = `  // SutureLoop Verified Patch: AST-guided safe navigation with fallback\n${offendingLine.replace(/\./g, '?.').replace(/(\?\.[a-zA-Z0-9_]+)/, '$1 ?? "Unknown City"')}`;
         robustPatch = patchLines.join('\n');
       } else {
         robustPatch = robustPatch.replace(

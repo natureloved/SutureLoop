@@ -8,12 +8,43 @@ import { assertValidTargetFile } from '../core/invariants.js';
 
 const execFileAsync = promisify(execFile);
 
+let entireAvailableCache: boolean | undefined;
+
+/**
+ * True when the `entire` CLI is installed and answers.
+ *
+ * The README documents `entire` as a prerequisite. When it is missing the demo
+ * used to print `spawn entire ENOENT` mid-run and silently degrade, which reads
+ * as "the central claim does not work". This makes the state explicit up front.
+ */
+export async function isEntireCliAvailable(): Promise<boolean> {
+  if (entireAvailableCache !== undefined) {
+    return entireAvailableCache;
+  }
+  try {
+    await execFileAsync('entire', ['--version']);
+    entireAvailableCache = true;
+  } catch {
+    entireAvailableCache = false;
+  }
+  return entireAvailableCache;
+}
+
 export async function resolveAstBlastRadius(
   filePath: string,
   line: number
 ): Promise<BlastRadiusReport> {
   // Validate target file against injection and boundary traversal
   assertValidTargetFile(filePath);
+
+  const entirePresent = await isEntireCliAvailable();
+  if (!entirePresent) {
+    console.warn(
+      `[Entire] The 'entire' CLI is not on PATH. Blast radius will come from the ` +
+        `text-scan fallback and its callers are UNVERIFIED. Install Entire to get a ` +
+        `real AST call graph: see https://docs.entire.dev`
+    );
+  }
 
   let normPath = filePath.replace(/\\/g, '/');
   const rootPath = process.cwd().replace(/\\/g, '/');
@@ -90,9 +121,20 @@ export async function resolveAstBlastRadius(
 }
 
 /**
- * Deterministic regex-based AST fallback parser:
- * Reads the target source file, scans upward from crash line to locate enclosing function,
- * and searches calling files in demo/service for callers.
+ * Text-scan fallback used when the `entire` CLI is not available.
+ *
+ * IMPORTANT: this is a lexical scanner, NOT an AST parser. It finds the
+ * enclosing function by scanning upward for a declaration keyword and then
+ * greps other files for the identifier. Consequences:
+ *
+ *  - It cannot distinguish a real call site from a string literal, an import,
+ *    a comment, or the synthesizer's own generated test.
+ *  - It cannot see callers in files it does not scan.
+ *
+ * It is therefore labelled `resolvedVia: 'text-scan-fallback'` and callers are
+ * reported as UNVERIFIED so the demo never presents a grep as a call graph.
+ * Callers that are merely the identifier inside a string, a comment or an
+ * import are dropped, which removes the most misleading false positives.
  */
 export function regexAstFallback(
   filePath: string,
@@ -125,6 +167,17 @@ export function regexAstFallback(
     const callers: AstCaller[] = [];
     const searchDirs = [path.resolve('demo/service'), path.resolve('src')];
 
+    /** True when the identifier appears as a real call, not as prose. */
+    const isCallSite = (text: string): boolean => {
+      const t = text.trim();
+      if (t.startsWith('//') || t.startsWith('*') || t.startsWith('/*')) return false;
+      if (/^(import|export)\s/.test(t) && !/\{\s*$/.test(t)) return false;
+      // A bare identifier inside a string literal is prose, not a call.
+      if (/['"`][^'"`]*\b/.test(t) && !/\w\s*\(/.test(t)) return false;
+      // Require an actual invocation: identifier followed by an open paren.
+      return new RegExp(`\\b${targetFunction}\\s*\\(`).test(t);
+    };
+
     for (const searchDir of searchDirs) {
       if (fs.existsSync(searchDir) && targetFunction !== 'unknownFunction') {
         const files = getAllFiles(searchDir);
@@ -133,16 +186,16 @@ export function regexAstFallback(
             const relPath = path.relative(process.cwd(), f).replace(/\\/g, '/');
             const fileLines = fs.readFileSync(f, 'utf-8').split('\n');
             fileLines.forEach((fileLine, idx) => {
-              // Exclude the definition line itself
               if (
                 fileLine.includes(targetFunction) &&
+                isCallSite(fileLine) &&
                 !(relPath === filePath && idx + 1 <= line && idx + 1 >= line - 10)
               ) {
                 callers.push({
                   filePath: relPath,
-                  functionName: fileLine.trim().slice(0, 40),
+                  functionName: targetFunction,
                   lineNumber: idx + 1,
-                  relation: 'CALLS'
+                  relation: 'CALLS_UNVERIFIED'
                 });
               }
             });
@@ -152,7 +205,8 @@ export function regexAstFallback(
     }
 
     console.log(
-      `[Regex-AST] Isolated function: "${targetFunction}" with ${callers.length} callers`
+      `[Text-Scan] Isolated function: "${targetFunction}" with ${callers.length} candidate callers ` +
+        `(UNVERIFIED: the 'entire' CLI is not installed, so this is a lexical scan, not an AST call graph)`
     );
 
     return {
@@ -161,10 +215,10 @@ export function regexAstFallback(
       lineNumber: line,
       callers,
       callees: [],
-      resolvedVia: 'regex-fallback'
+      resolvedVia: 'text-scan-fallback'
     };
   } catch (err: any) {
-    throw new AstQueryFailed(`Regex AST fallback failed: ${err.message}`);
+    throw new AstQueryFailed(`Text-scan fallback failed: ${err.message}`);
   }
 }
 

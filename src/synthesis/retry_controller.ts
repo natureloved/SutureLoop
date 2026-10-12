@@ -43,10 +43,14 @@ export class RetryController {
     targetFile: string,
     span: FailureSpan,
     blastRadius: BlastRadiusReport,
-    forceFault = false
+    forceFault = false,
+    retryLimit = 2
   ): Promise<{ attempts: PatchAttemptResult[]; totalTokenCostUSD: number; success: boolean }> {
     const attempts: PatchAttemptResult[] = [];
     let totalTokenCostUSD = 0;
+    // The loop is bounded by retryLimit (>= 1). Attempt 1 is always the
+    // trace-blind pass; every attempt after it gets full AST + trace context.
+    const maxAttempts = Math.max(1, Math.floor(retryLimit));
 
     // Step 1: Synthesize reproduction test
     console.log(`[RetryController] Synthesizing reproduction test in demo/tests/reproduction.test.ts...`);
@@ -57,9 +61,9 @@ export class RetryController {
     console.log(`[RetryController] Initial state saved to checkpoint: ${initialCheckpoint} (fenced to: ${targetFile})`);
 
     try {
-      // --- ATTEMPT 1: Trace-blind or forced fault ---
+      // --- ATTEMPT 1: Trace-blind synthesis ---
       console.log(`\n================== ATTEMPT 1 ==================`);
-      console.log(`[RetryController] Attempt 1: Trace-blind synthesis (deliberate or blind)...`);
+      console.log(`[RetryController] Attempt 1: Trace-blind synthesis (stack trace only, no caller context)...`);
       const patch1 = await PatchGenerator.generatePatch(targetFile, span, blastRadius, 1, forceFault);
       totalTokenCostUSD += patch1.costUSD;
 
@@ -70,13 +74,13 @@ export class RetryController {
       // Run tests
       const test1 = await this.runTests();
       const attempt1Passed = test1.passed;
-      console.log(`[RetryController] Attempt 1 test result: ${attempt1Passed ? 'PASSED' : 'FAILED (Expected)'}`);
+      console.log(`[RetryController] Attempt 1 test result: ${attempt1Passed ? 'PASSED' : 'FAILED'}`);
 
       let rollbackTime1 = 0;
       if (!attempt1Passed) {
-        console.log(`[RetryController] Triggering atomic rollback via Entire Checkpoint...`);
+        console.log(`[RetryController] Attempt 1 was incomplete: triggering atomic rollback via Entire Checkpoint...`);
         rollbackTime1 = await this.checkpointManager.restore(initialCheckpoint, targetFile);
-        
+
         const isClean = await this.checkpointManager.isTreePristine(targetFile);
         console.log(`[RetryController] Verification: Target file pristine? ${isClean}`);
       }
@@ -93,9 +97,20 @@ export class RetryController {
       });
 
       if (attempt1Passed) {
-        console.log(`[RetryController] Attempt 1 surprisingly passed.`);
+        // A trace-blind fix that passes every regression case needs no second
+        // pass -- stop rather than burning a second synthesis for theatre.
+        console.log(`[RetryController] Attempt 1 satisfied all regression cases; no further synthesis needed.`);
         await this.checkpointManager.pruneAll();
         return { attempts, totalTokenCostUSD, success: true };
+      }
+
+      // Honour the configured attempt budget. retryLimit = 1 means "one shot":
+      // no context-informed retry, so the failure is reported honestly.
+      if (maxAttempts < 2) {
+        console.log(`[RetryController] retryLimit=${maxAttempts}: attempt budget exhausted, no context-informed retry.`);
+        await this.checkpointManager.restore(initialCheckpoint, targetFile);
+        await this.checkpointManager.pruneAll();
+        return { attempts, totalTokenCostUSD, success: false };
       }
 
       // --- ATTEMPT 2: Full context + AST repair ---

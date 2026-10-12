@@ -24,7 +24,11 @@ export interface BlastRadiusReport {
   lineNumber: number;
   callers: AstCaller[];
   callees?: string[];
-  resolvedVia: 'entire-graph' | 'regex-fallback';
+  /**
+   * How the call graph was produced. 'text-scan-fallback' means a lexical
+   * scan, not an AST call graph -- callers from it are UNVERIFIED.
+   */
+  resolvedVia: 'entire-graph' | 'text-scan-fallback';
 }
 
 export interface CheckpointInfo {
