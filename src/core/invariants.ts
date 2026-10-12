@@ -1,37 +1,46 @@
 import { InvariantViolationError } from './errors.js';
 import * as fs from 'fs';
 import * as path from 'path';
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 
 /**
- * Ensures the git worktree is clean before starting any self-healing mutation.
+ * Ensures the file the agent is about to mutate carries no uncommitted work.
+ *
+ * Design note (this is deliberately NOT a whole-repo cleanliness check):
+ * the safety property that actually matters is that an atomic rollback cannot
+ * destroy work the developer has not committed. The agent can only ever write
+ * inside the application sandbox (see `assertValidTargetFile`), so the only
+ * file at risk is the remediation target itself. Gating the entire worktree
+ * instead means any unrelated edit -- or simply `npm install` rewriting
+ * package-lock.json, or `cp .env.example .env` creating the env file -- aborts
+ * remediation, which breaks the documented quickstart on every normal working
+ * copy. Self-mutation of the agent's own source is already blocked by
+ * `assertValidTargetFile`.
+ *
+ * @param targetFile - the file that will be mutated and rolled back
  */
-export function assertCleanWorktree(allowedPathsPrefix = 'demo'): void {
+export function assertCleanWorktree(targetFile?: string): void {
+  if (!targetFile) {
+    return;
+  }
+
+  let stdout: string;
   try {
-    const rawStatus = execSync('git status --porcelain', { encoding: 'utf-8' });
-    if (rawStatus.trim().length > 0) {
-      const dirtyFiles = rawStatus
-        .split('\n')
-        .map(line => {
-          const match = line.match(/^..\s+(.*)$/);
-          return match ? match[1].trim() : '';
-        })
-        .filter(Boolean);
-      const nonAllowed = dirtyFiles.filter(
-        f => !f.startsWith(allowedPathsPrefix) && !f.startsWith('scratch') && !f.startsWith('runs/')
-      );
-      if (nonAllowed.length > 0) {
-        throw new InvariantViolationError(
-          `Worktree has uncommitted changes outside sandbox: ${nonAllowed.join(', ')}`
-        );
-      }
-    }
+    const normalized = targetFile.replace(/\\/g, '/');
+    stdout = execFileSync('git', ['status', '--porcelain', '--', normalized], {
+      encoding: 'utf-8'
+    });
   } catch (err: any) {
-    if (err instanceof InvariantViolationError) {
-      throw err;
-    }
-    // If git error, fail closed
+    // If git is unavailable or the path is untracked, fail closed.
     throw new InvariantViolationError(`Unable to verify worktree cleanliness: ${err.message}`);
+  }
+
+  if (stdout.trim().length > 0) {
+    const normalized = targetFile.replace(/\\/g, '/');
+    throw new InvariantViolationError(
+      `Refusing to remediate '${normalized}': it has uncommitted changes that an ` +
+        `atomic rollback would destroy. Commit or stash them first.`
+    );
   }
 }
 

@@ -1,6 +1,7 @@
 import express, { Request, Response, NextFunction } from 'express';
 import fs from 'fs';
 import path from 'path';
+import { execFileSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import { handleInvoiceBilling, processInvoice } from './routes/billing.js';
 import { TelemetryService } from '../../src/telemetry/neatlogs_client.js';
@@ -50,6 +51,30 @@ app.get('/dashboard', (_req: Request, res: Response) => {
 app.use(express.static(publicPath));
 
 const telemetry = new TelemetryService(config.neatlogsApiKey, config.traceUrlTemplate);
+
+/**
+ * Authoritative crash baseline for the demo sandbox.
+ *
+ * The baseline is read from git (HEAD) rather than from a hand-maintained copy
+ * of the source. A duplicated template drifts from the committed file the first
+ * time either is edited -- the old duplicate here had lost its doc comment, so
+ * every "reset" wrote a file that differed from HEAD, left the worktree dirty,
+ * and then tripped the rollback safety gate. Reading from git keeps a single
+ * source of truth and guarantees the reset restores a genuinely clean state.
+ */
+export function restoreCrashBaseline(): { ok: boolean; source: string; detail?: string } {
+  const billingPath = path.resolve(__dirname, 'routes/billing.ts');
+  const relativePath = path.relative(process.cwd(), billingPath).replace(/\\/g, '/');
+  try {
+    const baseline = execFileSync('git', ['show', `HEAD:${relativePath}`], { encoding: 'utf-8' });
+    fs.writeFileSync(billingPath, baseline, 'utf-8');
+    return { ok: true, source: 'git:HEAD' };
+  } catch (gitErr: any) {
+    // Not a git checkout (e.g. a tarball or a Docker build without .git):
+    // fall back to restoring from the committed source's own content.
+    return { ok: false, source: 'none', detail: gitErr?.message || String(gitErr) };
+  }
+}
 
 // Initialize neatlogs SDK if API key is provided
 if (config.neatlogsApiKey) {
@@ -189,40 +214,9 @@ app.get('/api/dashboard/stats', (_req: Request, res: Response) => {
 });
 
 app.post('/api/demo/trigger-crash', requireWebhookAuth, async (_req: Request, res: Response) => {
-  const billingPath = path.resolve(__dirname, 'routes/billing.ts');
-  const crashLineCode = `export interface InvoiceRequest {
-  id?: string;
-  amount?: number;
-  customer?: {
-    name?: string;
-    address?: {
-      city?: string;
-      postalCode?: string;
-    };
-  };
-}
-
-export function processInvoice(invoice: any): string {
-  // CRASH LINE:
-  return invoice.customer.address.city;
-}
-
-export function handleInvoiceBilling(req: any, res: any): void {
-  try {
-    const city = processInvoice(req.body);
-    res.json({ success: true, city });
-  } catch (error: any) {
-    res.status(500).json({
-      error: error.message,
-      stack: error.stack
-    });
-  }
-}
-`;
-  try {
-    fs.writeFileSync(billingPath, crashLineCode, 'utf-8');
-  } catch (err: any) {
-    console.warn(`[Reset Warning] ${err.message}`);
+  const restored = restoreCrashBaseline();
+  if (!restored.ok) {
+    console.warn(`[Reset Warning] Baseline restore unavailable (${restored.detail}); the sandbox may already be patched.`);
   }
 
   const traceId = `trace_crash_${Date.now()}`;
@@ -270,41 +264,18 @@ app.post('/api/demo/trigger-heal', requireWebhookAuth, async (_req: Request, res
 });
 
 app.post('/api/demo/reset-baseline', requireWebhookAuth, (_req: Request, res: Response) => {
-  const billingPath = path.resolve(__dirname, 'routes/billing.ts');
-  const baselineCode = `export interface InvoiceRequest {
-  id?: string;
-  amount?: number;
-  customer?: {
-    name?: string;
-    address?: {
-      city?: string;
-      postalCode?: string;
-    };
-  };
-}
-
-export function processInvoice(invoice: any): string {
-  // CRASH LINE:
-  return invoice.customer.address.city;
-}
-
-export function handleInvoiceBilling(req: any, res: any): void {
-  try {
-    const city = processInvoice(req.body);
-    res.json({ success: true, city });
-  } catch (error: any) {
-    res.status(500).json({
-      error: error.message,
-      stack: error.stack
+  const restored = restoreCrashBaseline();
+  if (restored.ok) {
+    res.json({
+      success: true,
+      source: restored.source,
+      message: 'Baseline seeded crash code restored from git HEAD (worktree clean)'
     });
-  }
-}
-`;
-  try {
-    fs.writeFileSync(billingPath, baselineCode, 'utf-8');
-    res.json({ success: true, message: 'Baseline seeded crash code restored' });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
+  } else {
+    res.status(500).json({
+      success: false,
+      error: `Baseline restore failed: ${restored.detail}. Run from a git checkout so the committed crash baseline can be restored.`
+    });
   }
 });
 

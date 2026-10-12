@@ -145,6 +145,7 @@ async function runDemo() {
   console.log(`[Demo] Launching full end-to-end demonstration...`);
   console.log(`Step 1: Starting microservice on port ${config.port}...`);
 
+  const telemetry = new TelemetryService(config.neatlogsApiKey, config.traceUrlTemplate);
   const { startServer } = await import('../demo/service/server.js');
   const server = startServer(config.port);
 
@@ -152,7 +153,27 @@ async function runDemo() {
   await new Promise((resolve) => setTimeout(resolve, 1000));
 
   try {
-    console.log(`Step 2: Sending crashing payload to http://localhost:${config.port}/api/billing/invoice...`);
+    // Step 2a: ALWAYS restore the crashing baseline first.
+    //
+    // The demo writes a patch into demo/service/routes/billing.ts as its output.
+    // Without this reset, a second run of `npm run demo` starts from an already
+    // healed file: the seeded crash no longer throws, no failure span is
+    // recorded, and the healing loop has nothing to do. The demo must be
+    // runnable repeatedly without manual intervention.
+    console.log(`\nStep 2: Restoring seeded-crash baseline (idempotent demo reset)...`);
+    const resetRes = await fetch(`http://localhost:${config.port}/api/demo/reset-baseline`, {
+      method: 'POST'
+    });
+    if (resetRes.ok) {
+      console.log(`  ✓ Baseline crash code restored.`);
+    } else {
+      console.warn(`  ! Baseline reset returned HTTP ${resetRes.status}; continuing.`);
+    }
+
+    // Clear the local telemetry queue so the run reads only spans it produces.
+    telemetry.clearLocalQueue();
+
+    console.log(`\nStep 3: Sending crashing payload to http://localhost:${config.port}/api/billing/invoice...`);
     const crashRes = await fetch(`http://localhost:${config.port}/api/billing/invoice`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -160,16 +181,31 @@ async function runDemo() {
     });
 
     const crashData = await crashRes.json();
+    if (crashRes.status !== 500) {
+      throw new Error(
+        `Demo precondition failed: expected the seeded crash to return HTTP 500, got ${crashRes.status}. ` +
+        `The crash baseline was not restored correctly.`
+      );
+    }
     console.log(`  ✓ Received expected HTTP ${crashRes.status} Error:`, crashData.error);
 
-    console.log(`\nStep 3: Triggering SutureLoop autonomous remediation loop...`);
+    console.log(`\nStep 4: Triggering SutureLoop autonomous remediation loop...`);
     const orchestrator = new SutureLoopOrchestrator();
     const result = await orchestrator.run(undefined, forceFault);
 
-    console.log(`\nStep 4: Verifying service with post-fix payload...`);
+    if (result.finalStatus !== 'HEALED') {
+      throw new Error(`Demo healing loop did not reach a verified HEALED state (got: ${result.finalStatus}).`);
+    }
+
+    console.log(`\nStep 5: Verifying service with post-fix payload...`);
     const healedModule = await import(`../demo/service/routes/billing.js?t=${Date.now()}`);
     const verifiedCity = healedModule.processInvoice({});
     console.log(`  ✓ Healed processInvoice returned: "${verifiedCity}" without throwing!`);
+
+    if (typeof verifiedCity !== 'string' || verifiedCity.length === 0) {
+      throw new Error(`Healed processInvoice returned an unusable value: ${String(verifiedCity)}`);
+    }
+
     console.log(`\n🎉 End-to-End Demo Successfully Completed!`);
   } finally {
     if (server && typeof server.close === 'function' && server.listening) {
@@ -178,6 +214,21 @@ async function runDemo() {
     const reproFile = path.resolve('demo/tests/reproduction.test.ts');
     if (fs.existsSync(reproFile)) {
       try { fs.unlinkSync(reproFile); } catch {}
+    }
+
+    // Leave the working tree clean. The demo's output IS a patch written into
+    // the sandbox file; without this restore the next run starts from an
+    // already-healed file and the healing loop has nothing to do.
+    try {
+      const { restoreCrashBaseline } = await import('../demo/service/server.js');
+      const restored = restoreCrashBaseline();
+      if (restored.ok) {
+        console.log(`\n[Cleanup] Sandbox restored to committed crash baseline (${restored.source}); working tree clean.`);
+      } else {
+        console.warn(`\n[Cleanup] Could not restore sandbox baseline: ${restored.detail}`);
+      }
+    } catch (cleanupErr: any) {
+      console.warn(`[Cleanup] Sandbox restore skipped: ${cleanupErr?.message || cleanupErr}`);
     }
   }
 }

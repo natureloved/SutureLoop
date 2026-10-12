@@ -55,10 +55,12 @@ export class SutureLoopOrchestrator {
     // Validate target file against boundary traversal, injection, and self-mutation
     assertValidTargetFile(targetFile);
 
-    // 2. Pre-flight Check: Ensure Worktree is Pristine
-    console.log(`\n[Step 2] Verifying Git worktree cleanliness...`);
-    assertCleanWorktree('demo');
-    console.log(`  ✓ Worktree is verified clean.`);
+    // 2. Pre-flight Check: Ensure the remediation target carries no uncommitted work
+    // that an atomic rollback would destroy. Scoped to the target file only --
+    // unrelated edits elsewhere in the repo must not block remediation.
+    console.log(`\n[Step 2] Verifying remediation target is safe to mutate...`);
+    assertCleanWorktree(targetFile);
+    console.log(`  ✓ Target file is safe to mutate (no uncommitted work at risk).`);
 
     // 3. Resolve AST Blast Radius using Entire Graph
     console.log(`\n[Step 3] Analyzing AST Blast Radius with Entire Graph...`);
