@@ -34,15 +34,23 @@ export class GitHubPRClient {
   async createRemediationPullRequest(payload: PullRequestPayload): Promise<{ prUrl?: string; branch: string; skipped: boolean; reason?: string }> {
     const branch = `sutureloop/fix-${payload.sessionId}`;
 
+    // Safe default: Do NOT automatically push branches to remote Git unless explicitly opted in
+    const isRemotePushEnabled = process.env.ENABLE_REMOTE_PR === 'true' || process.env.AUTO_PUSH_PR === 'true';
+    if (!isRemotePushEnabled) {
+      console.log(`[GitHub] Remote PR push is disabled by default for local safety. Set ENABLE_REMOTE_PR=true to enable remote git branch pushes.`);
+      return { branch, skipped: true, reason: 'REMOTE_PUSH_DISABLED_SAFETY_GUARD' };
+    }
+
     if (!this.token) {
-      console.log(`[GitHub] GITHUB_TOKEN not configured. Skipping remote PR creation (local verified branch retained: ${branch}).`);
+      console.log(`[GitHub] GITHUB_TOKEN not configured. Skipping remote PR creation.`);
       return { branch, skipped: true, reason: 'GITHUB_TOKEN_NOT_CONFIGURED' };
     }
 
     try {
       console.log(`[GitHub] Checking out remediation branch: ${branch}...`);
       await execAsync(`git checkout -b ${branch}`);
-      await execAsync(`git add -A`);
+      // Scope addition STRICTLY to the remediated target file, never repo-wide add -A
+      await execAsync(`git add ${payload.targetFile}`);
       await execAsync(`git -c core.hooksPath="" commit -m "fix(sutureloop): autonomous verified remediation for ${payload.incidentTraceId}"`);
       await execAsync(`git -c core.hooksPath="" push origin ${branch}`);
 

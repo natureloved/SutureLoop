@@ -14,7 +14,8 @@
     "serve": "tsx demo/service/server.ts",
     "dev": "tsx watch demo/service/server.ts",
     "demo:heal": "tsx bin/sutureloop.ts auto-heal",
-    "demo:fail": "tsx bin/sutureloop.ts auto-heal --demo-force-fault"
+    "demo:fail": "tsx bin/sutureloop.ts auto-heal --demo-force-fault",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "dotenv": "^16.4.7",

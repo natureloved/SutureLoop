@@ -2,7 +2,9 @@ node_modules/
 dist/
 .env
 scratch/
-runs/
+runs/*
+!runs/posts/
+!runs/posts/**
 .agents/
 *.log
 demo/tests/reproduction.test.ts

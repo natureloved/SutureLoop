@@ -59,6 +59,7 @@ export class TraceInterceptor {
     if (parsed) {
       return {
         ...span,
+        name: parsed.functionName || span.name,
         filePath: parsed.filePath,
         lineNumber: parsed.lineNumber,
       };

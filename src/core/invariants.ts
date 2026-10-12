@@ -36,15 +36,20 @@ export function assertValidTargetFile(filePath: string): void {
     throw new InvariantViolationError('Target file path cannot be empty.');
   }
 
+  // Prevent shell metacharacters and command injection
+  if (/[\0\r\n;&|`$(){}<>"'\\]/.test(filePath) && !filePath.includes(':\\')) {
+    throw new InvariantViolationError(`Malicious characters detected in target file path: ${filePath}`);
+  }
+
   const resolved = path.resolve(filePath);
   if (!fs.existsSync(resolved)) {
     throw new InvariantViolationError(`Target file does not exist on disk: ${filePath}`);
   }
 
-  // Bound to demo/ or workspace
+  // Bound strictly to workspace root
   const workspaceRoot = process.cwd();
-  if (!resolved.startsWith(workspaceRoot)) {
-    throw new InvariantViolationError(`Target file is outside the workspace root: ${filePath}`);
+  if (!resolved.toLowerCase().startsWith(workspaceRoot.toLowerCase())) {
+    throw new InvariantViolationError(`Target file is outside the workspace root boundary: ${filePath}`);
   }
 }
 

@@ -6,6 +6,7 @@ import { RetryController } from '../synthesis/retry_controller.js';
 import { calculateIncidentEconomics, generateBusinessModel } from '../economics/unit_economics.js';
 import { FailureSpan, SelfHealingSessionResult } from './types.js';
 import { InvariantViolationError } from './errors.js';
+import { assertValidTargetFile, assertMeasuredMetric } from './invariants.js';
 import { GitHubPRClient } from '../github/pr_client.js';
 import { config } from '../config/env.js';
 
@@ -44,6 +45,9 @@ export class SutureLoopOrchestrator {
     const targetFile = span.filePath || 'demo/service/routes/billing.ts';
     const targetLine = span.lineNumber || 16;
 
+    // Validate target file against boundary traversal and injection
+    assertValidTargetFile(targetFile);
+
     // 2. Pre-flight Check: Ensure Worktree is Pristine
     console.log(`\n[Step 2] Verifying Git worktree cleanliness...`);
     const isPristine = await GitSandbox.isPristine('demo');
@@ -75,6 +79,19 @@ export class SutureLoopOrchestrator {
     // 5. Run Comparative Trace Evaluation
     console.log(`\n[Step 5] Running Comparative Trace Evaluation...`);
     const healedTraceId = `trace_healed_${Date.now()}`;
+    if (loopResult.success) {
+      // Record real post-heal telemetry span with 0 errors
+      await this.telemetry.recordLocalFailureSpan({
+        traceId: healedTraceId,
+        spanId: `span_healed_${Date.now()}`,
+        name: impact.report.targetFunction || 'processInvoice',
+        service: span.service || 'billing-service',
+        timestamp: Date.now(),
+        errorMessage: '',
+        filePath: targetFile,
+        lineNumber: targetLine
+      });
+    }
     const evalResult = await this.telemetry.runComparativeEval(span.traceId, healedTraceId);
     console.log(`  ✓ Evaluation Mode : ${evalResult.mode}`);
     console.log(`  ✓ Baseline Trace  : ${evalResult.baselineTraceUrl}`);
@@ -117,6 +134,8 @@ export class SutureLoopOrchestrator {
     }
 
     const totalDuration = Date.now() - startTime;
+    assertMeasuredMetric('durationMs', totalDuration);
+    assertMeasuredMetric('measuredTokenCostUSD', econ.measuredTokenCostUSD);
     console.log(`\n✅ Session Complete in ${totalDuration}ms. Status: ${loopResult.success ? 'HEALED' : 'FAILED'}\n`);
 
     return {

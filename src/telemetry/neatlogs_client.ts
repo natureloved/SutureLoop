@@ -92,7 +92,8 @@ export class TelemetryService {
         const spans: FailureSpan[] = JSON.parse(fileContent);
         for (let i = spans.length - 1; i >= 0; i--) {
           const s = spans[i];
-          if (!this.seenTraceIds.has(s.traceId)) {
+          const hasError = Boolean(s.errorMessage && s.errorMessage.trim().length > 0);
+          if (hasError && !this.seenTraceIds.has(s.traceId)) {
             this.seenTraceIds.add(s.traceId);
             this.lastPolledTimestamp = Date.now();
             return TraceInterceptor.extractFailureContext(s);

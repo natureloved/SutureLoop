@@ -77,19 +77,28 @@ async function runAutoHeal() {
   console.log(`╔═══════════════════════════════════════════════════════════════╗`);
   console.log(`║                    EXECUTIVE HEALING REPORT                   ║`);
   console.log(`╠═══════════════════════════════════════════════════════════════╣`);
+  const healedTrace = result.healedTraceId || 'N/A';
+  const econ = result.economicMetrics || {
+    measuredTokenCostUSD: 0,
+    mttrHoursSaved: 0,
+    grossSavingsUSD: 0,
+    netSavingsUSD: 0,
+    grossMarginPercent: 0
+  };
+
   console.log(`║ Session ID     : ${result.sessionId.padEnd(44)} ║`);
   console.log(`║ Incident Trace : ${result.incidentTraceId.padEnd(44)} ║`);
-  console.log(`║ Healed Trace   : ${result.healedTraceId.padEnd(44)} ║`);
+  console.log(`║ Healed Trace   : ${healedTrace.padEnd(44)} ║`);
   console.log(`║ Status         : ${result.finalStatus === 'HEALED' ? 'VERIFIED HEALED ✅' : 'FAILED ❌'}                          ║`);
   console.log(`║ Duration       : ${(result.durationMs + ' ms').padEnd(44)} ║`);
   console.log(`║ Rollback Count : ${(result.attempts.filter(a => a.rollbackOccurred).length.toString()).padEnd(44)} ║`);
   console.log(`╠═══════════════════════════════════════════════════════════════╣`);
   console.log(`║                    cfo.ai FINANCIAL AUDIT                     ║`);
   console.log(`╠═══════════════════════════════════════════════════════════════╣`);
-  console.log(`║ Measured Cost  : $${result.economicMetrics.measuredTokenCostUSD.toFixed(4).padEnd(43)} ║`);
-  console.log(`║ MTTR Saved     : ${(result.economicMetrics.mttrHoursSaved + ' hrs ($' + result.economicMetrics.grossSavingsUSD + ')').padEnd(44)} ║`);
-  console.log(`║ Net ROI/Fix    : $${result.economicMetrics.netSavingsUSD.toFixed(2).padEnd(43)} ║`);
-  console.log(`║ Gross Margin   : ${(result.economicMetrics.grossMarginPercent + '%').padEnd(44)} ║`);
+  console.log(`║ Measured Cost  : $${econ.measuredTokenCostUSD.toFixed(4).padEnd(43)} ║`);
+  console.log(`║ MTTR Saved     : ${(econ.mttrHoursSaved + ' hrs ($' + econ.grossSavingsUSD + ')').padEnd(44)} ║`);
+  console.log(`║ Net ROI/Fix    : $${econ.netSavingsUSD.toFixed(2).padEnd(43)} ║`);
+  console.log(`║ Gross Margin   : ${(econ.grossMarginPercent + '%').padEnd(44)} ║`);
   console.log(`╚═══════════════════════════════════════════════════════════════╝`);
 
   if (result.evalResult) {
@@ -162,7 +171,13 @@ async function runDemo() {
     console.log(`  ✓ Healed processInvoice returned: "${verifiedCity}" without throwing!`);
     console.log(`\n🎉 End-to-End Demo Successfully Completed!`);
   } finally {
-    server.close();
+    if (server && typeof server.close === 'function' && server.listening) {
+      server.close();
+    }
+    const reproFile = path.resolve('demo/tests/reproduction.test.ts');
+    if (fs.existsSync(reproFile)) {
+      try { fs.unlinkSync(reproFile); } catch {}
+    }
   }
 }
 

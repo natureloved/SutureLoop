@@ -1,28 +1,40 @@
-import { exec } from 'child_process';
+import { execFile } from 'child_process';
 import { promisify } from 'util';
 import * as fs from 'fs';
 import * as path from 'path';
 import { AstQueryFailed } from '../core/errors.js';
 import { AstCaller, BlastRadiusReport } from '../core/types.js';
+import { assertValidTargetFile } from '../core/invariants.js';
 
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 export async function resolveAstBlastRadius(
   filePath: string,
   line: number
 ): Promise<BlastRadiusReport> {
+  // Validate target file against injection and boundary traversal
+  assertValidTargetFile(filePath);
+
   let normPath = filePath.replace(/\\/g, '/');
   const rootPath = process.cwd().replace(/\\/g, '/');
   if (normPath.toLowerCase().startsWith(rootPath.toLowerCase())) {
     normPath = normPath.slice(rootPath.length).replace(/^\//, '');
   }
-  const targetSymbol = `${normPath}:${line}`;
+  const safeLine = Number.isInteger(line) && line > 0 ? line : 1;
+  const targetSymbol = `${normPath}:${safeLine}`;
 
   try {
-    // Run entire graph impact using the official CLI format discovered in Spike 1
-    const { stdout, stderr } = await execAsync(
-      `entire graph impact --repo . --symbol "${targetSymbol}" --format json`
-    );
+    // Run entire graph impact using direct argument array (no shell interpolation, immune to command injection)
+    const { stdout } = await execFileAsync('entire', [
+      'graph',
+      'impact',
+      '--repo',
+      '.',
+      '--symbol',
+      targetSymbol,
+      '--format',
+      'json'
+    ]);
 
     const parsed = JSON.parse(stdout);
 
