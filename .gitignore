@@ -5,7 +5,6 @@ scratch/
 runs/*
 !runs/posts/
 !runs/posts/**
-.agents/
 *.log
 demo/tests/reproduction.test.ts
 .neatlogs_local_spans.json
