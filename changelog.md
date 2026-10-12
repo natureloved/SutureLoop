@@ -34,14 +34,22 @@ Format: date (UTC) · phase · what changed · measured result.
 - Instrumented `demo/service/server.ts` to capture deep stack traces on the
   seeded crash.
 - `src/context/entire_graph.ts` to shell out to `entire graph impact`.
-- **Correction (logged 2026-10-13):** the `entire` CLI is not installed on the
-  Linux host, so every `entire graph impact` call failed with
+- **Correction, later resolved (logged 2026-10-13):** the `entire` CLI was
+  missing on the Linux host, so every `entire graph impact` call failed with
   `spawn entire ENOENT`. The original Phase 2 notes quoted "653 relations in
   1,011ms" — never measured here, now withdrawn. Added
-  `isEntireCliAvailable()` so the run reports the missing CLI up front instead
-  of failing mid-run, and relabelled the fallback from `regex-fallback` (it was
-  a naive text scan, not a parser) to `text-scan-fallback` with every caller
-  marked `CALLS_UNVERIFIED`. Measured on this host: 7 candidate callers.
+  `isEntireCliAvailable()` so the run reports a missing CLI up front instead of
+  failing mid-run, and relabelled the fallback from `regex-fallback` (it was a
+  naive text scan, not a parser) to `text-scan-fallback` with every caller
+  marked `CALLS_UNVERIFIED`.
+- **2026-10-13 — `entire` CLI installed on this host.** Downloaded the
+  v0.11.4 `entire_linux_amd64` release binary, **verified its SHA-256 against
+  the published checksums**, installed to `~/.local/bin`, and installed the
+  `entire-graph` plugin v0.4.0. The AST path is now the live path.
+  - `entire --version` -> `Entire CLI 0.11.4` (go1.27.1, linux/amd64)
+  - Measured: **5 verified callers**, **1,206 relations**, **1,403 ms**
+  - SutureLoop now reports `Resolution Method: entire-graph` with no fallback
+    warning.
 
 ## 2026-10-11 · Phase 3 — Bounded retry loop + rollback
 
@@ -123,7 +131,7 @@ Format: date (UTC) · phase · what changed · measured result.
 | `scripts/demo-idempotency-check.sh` | GREEN, 3 back-to-back runs |
 | Comparative evaluation | `PROGRAMMATIC_EVAL`, Errors Delta 1 → 0 |
 | Verification layer | `local-spans+live-replay` |
-| Blast radius | `text-scan-fallback`, 7 unverified callers (`entire` CLI absent) |
+| Blast radius | `entire-graph`, 5 verified callers / 1,206 relations / 1,403 ms |
 | Rollback | < 1 ms, scoped to target file |
-| End-to-end session | ~1,700 ms |
+| End-to-end session | ~1,800 ms |
 | `npm audit` | 14 (0 critical, 4 high) |

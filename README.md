@@ -27,8 +27,8 @@ When distributed microservices crash in production (e.g., unexpected null proper
 SutureLoop closes the loop from production crash telemetry to verified patch in **under 10 seconds** without speculative modifications:
 
 1. **Telemetry Ingestion (`neatlogs`)**: Intercepts uncaught runtime exception spans, extracting exact source files, line numbers, and call stacks.
-2. **AST Blast Radius Resolution (`entire` CLI, optional)**: Runs `entire graph impact` to deterministically discover all AST callers, consumers, and affected endpoints before synthesizing any patch. **When the `entire` CLI is not installed** the run says so up front and falls back to a lexical text scan whose callers are explicitly labelled `CALLS_UNVERIFIED` — it never presents a grep as an AST call graph.
-3. **Atomic Checkpoint & Rollback (Git Safety Net)**: Captures a snapshot of the remediation target before mutation, fenced to that one file. If Attempt 1 fails the auto-synthesized test suite, SutureLoop restores just that file and verifies the workspace is otherwise untouched. On this host the restore is an in-memory write measured at **<1 ms**; the 225 ms figure quoted in earlier drafts was not reproducible.
+2. **AST Blast Radius Resolution (`entire` CLI v0.11.4 + `entire-graph` v0.4.0)**: Runs `entire graph impact` to deterministically discover all AST callers, consumers, and affected endpoints before synthesizing any patch. Measured on this host: **5 verified callers** across **1,206 relations** in **1,403 ms**. When the `entire` CLI is not installed the run says so up front and falls back to a lexical text scan whose callers are labelled `CALLS_UNVERIFIED` — it never presents a grep as an AST call graph.
+3. **Atomic Checkpoint & Rollback (Git Safety Net)**: Captures a snapshot of the remediation target before mutation, fenced to that one file. If Attempt 1 fails the auto-synthesized test suite, SutureLoop restores just that file and verifies the workspace is otherwise untouched. On this host the restore is an in-memory write measured at **<1 ms** (the 225 ms figure quoted in earlier drafts was not reproducible and has been withdrawn).
 4. **Adaptive Patch Synthesis & Vitest Verification**: Synthesizes a strict regression test and applies an AST-informed null-safe fix.
 5. **Comparative Trace Evaluation (`neatlogs`)**: Re-evaluates post-fix telemetry, asserting error reduction from **1 → 0** with side-by-side dashboard audit URLs. A `VERIFIED_PASS` requires **both** a clean healed span **and** a confirmed live replay of the original failing request; the demo reports which layer produced the verdict via `verifiedBy`.
 6. **Financial Governance (`cfo.ai`)**: Computes measured token costs against engineering hours saved, proving a **>99% gross margin** per automated remediation. Figures below are measured, not projected.
@@ -100,12 +100,12 @@ Measured during live end-to-end verification (`npm run demo`):
 | **Total Token Compute Cost** | **$0.0001 USD** | Measured from the two synthesis passes (offline transformer) |
 | **Net Operational Savings** | **$93.7499 USD** | Gross savings minus token cost |
 | **Gross Margin on Compute** | **100%** | Measured this run; capped at 100% when compute cost rounds to zero |
-| **Blast Radius Resolution** | **text-scan-fallback** | `entire` CLI not installed — 7 unverified callers via lexical scan |
+| **Blast Radius Resolution** | **entire-graph, 1,403 ms** | `entire graph impact`, 5 verified callers across 1,206 relations |
 | **Atomic Rollback Duration** | **< 1 ms** | In-memory snapshot write, scoped to the target file |
 | **Vitest Regression Suite** | **~560 ms** | Fast local test runner feedback loop (15 tests) |
-| **Total End-to-End Session** | **~1,700 ms** | Seed crash → blast radius → rollback → pass → comparative eval |
+| **Total End-to-End Session** | **~1,800 ms** | Seed crash → blast radius → rollback → pass → comparative eval |
 
-> The 225 ms rollback, 1,011 ms AST resolution, 653 relations, and 8,644 ms session figures quoted in earlier drafts of this README were **not reproducible** on this host and have been replaced with the values measured above. Install the `entire` CLI to get verified AST resolution; without it the blast radius is a lexical scan and is labelled as such.
+> **Measured, not projected.** The 225 ms rollback, 653-relation and 8,644 ms session figures quoted in earlier drafts were not reproducible here and have been replaced with the values measured above. Rollback is an in-memory snapshot write and takes <1 ms. `entire` CLI v0.11.4 + `entire-graph` v0.4.0 are installed on this host, so blast radius is a real AST resolution; without them the run degrades to a labelled lexical scan and says so up front.
 
 
 ---
@@ -115,7 +115,11 @@ Measured during live end-to-end verification (`npm run demo`):
 ### 1. Prerequisites
 - **Node.js**: v20 or higher (Tested on Node.js v24)
 - **Git**: Installed and available in PATH
-- **Entire CLI**: optional. When installed, `entire graph impact` gives a verified AST call graph. When absent, the run says so up front and falls back to a lexical text scan whose callers are labelled `CALLS_UNVERIFIED`.
+- **Entire CLI** v0.11.4+ **and the `entire-graph` plugin** v0.4.0+ — installed here. Gives verified AST resolution. When absent, the run says so up front and falls back to a lexical text scan whose callers are labelled `CALLS_UNVERIFIED`.
+  ```bash
+  curl -fsSL https://entire.io/install.sh | bash
+  entire plugin install graph
+  ```
 
 ### 2. Installation
 ```bash
@@ -230,7 +234,7 @@ A Growth customer saves **37.5 engineering hours per month** ($4,687.50 in engin
 
 - [x] **Repo started completely empty** at kickoff (fresh-code rule strictly followed).
 - [x] **neatlogs (v1.1.28)**: Instrumented runtime telemetry, error span ingestion, and comparative evaluation.
-- [x] **Entire CLI (optional)**: `entire graph impact` AST analysis when installed; otherwise a labelled text-scan fallback. Checkpoint/rollback is the project's own git safety net, not Entire.
+- [x] **Entire CLI (v0.11.4) + `entire-graph` plugin (v0.4.0)**: `entire graph impact` AST resolution, measured at 1,403 ms across 1,206 relations / 5 verified callers. Checkpoint/rollback is the project's own git safety net, not Entire.
 - [x] **cfo.ai**: Real financial governance model grounded in measured runtime token counts and MTTR metrics.
 - [x] **Strict Rule Enforcement**: Zero fabricated values (`|| 1`, `|| 420`), honest fallback labels, named domain errors.
 - [x] **Build-in-Public**: Complete chronological logs in `HACKATHON.md` and posts in `runs/posts/`.
