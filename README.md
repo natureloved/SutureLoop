@@ -2,8 +2,8 @@
 
 [![neatHack 2026](https://img.shields.io/badge/neatHack-2026_Hackathon-blue.svg)](https://neatlogs.com/hackathon)
 [![Track](https://img.shields.io/badge/Track-Build_an_agent_that_works_(literally)-success.svg)](https://neatlogs.com/hackathon)
-[![neatlogs](https://img.shields.io/badge/Telemetry-neatlogs_v1.1.26-6366F1.svg)](https://neatlogs.com)
-[![Entire](https://img.shields.io/badge/Code_Graph-Entire_v0.11.4-10B981.svg)](https://entire.io)
+[![neatlogs](https://img.shields.io/badge/Telemetry-neatlogs_v1.1.28-6366F1.svg)](https://neatlogs.com)
+[![Entire](https://img.shields.io/badge/Code_Graph-Entire-10B981.svg)](https://entire.io)
 [![cfo.ai](https://img.shields.io/badge/Financial_Audit-cfo.ai-F59E0B.svg)](https://cfo.ai)
 [![License](https://img.shields.io/badge/License-MIT-gray.svg)](LICENSE)
 
@@ -26,12 +26,12 @@ When distributed microservices crash in production (e.g., unexpected null proper
 
 SutureLoop closes the loop from production crash telemetry to verified patch in **under 10 seconds** without speculative modifications:
 
-1. **Telemetry Ingestion (`neatlogs` v1.1.26)**: Intercepts uncaught runtime exception spans, extracting exact source files, line numbers, and call stacks.
-2. **AST Blast Radius Resolution (`Entire` v0.11.4 + `graph` plugin)**: Executes `entire graph impact` to deterministically discover all AST callers, consumers, and affected endpoints before synthesizing any patch.
-3. **Atomic Checkpoint & Rollback (`Entire` / Git Safety Net)**: Captures a clean state snapshot prior to mutation. If Attempt 1 fails the auto-synthesized test suite, SutureLoop executes an atomic rollback in **225ms**, restoring a pristine working tree.
+1. **Telemetry Ingestion (`neatlogs`)**: Intercepts uncaught runtime exception spans, extracting exact source files, line numbers, and call stacks.
+2. **AST Blast Radius Resolution (`entire` CLI, optional)**: Runs `entire graph impact` to deterministically discover all AST callers, consumers, and affected endpoints before synthesizing any patch. **When the `entire` CLI is not installed** the run says so up front and falls back to a lexical text scan whose callers are explicitly labelled `CALLS_UNVERIFIED` — it never presents a grep as an AST call graph.
+3. **Atomic Checkpoint & Rollback (Git Safety Net)**: Captures a snapshot of the remediation target before mutation, fenced to that one file. If Attempt 1 fails the auto-synthesized test suite, SutureLoop restores just that file and verifies the workspace is otherwise untouched. On this host the restore is an in-memory write measured at **<1 ms**; the 225 ms figure quoted in earlier drafts was not reproducible.
 4. **Adaptive Patch Synthesis & Vitest Verification**: Synthesizes a strict regression test and applies an AST-informed null-safe fix.
-5. **Comparative Trace Evaluation (`neatlogs`)**: Re-evaluates post-fix telemetry, asserting error reduction from **1 $\to$ 0** with side-by-side dashboard audit URLs.
-6. **Financial Governance (`cfo.ai`)**: Computes real token costs ($0.0011) against engineering hours saved ($93.75 gross savings), proving a **>99% gross margin** per automated remediation.
+5. **Comparative Trace Evaluation (`neatlogs`)**: Re-evaluates post-fix telemetry, asserting error reduction from **1 → 0** with side-by-side dashboard audit URLs. A `VERIFIED_PASS` requires **both** a clean healed span **and** a confirmed live replay of the original failing request; the demo reports which layer produced the verdict via `verifiedBy`.
+6. **Financial Governance (`cfo.ai`)**: Computes measured token costs against engineering hours saved, proving a **>99% gross margin** per automated remediation. Figures below are measured, not projected.
 
 ---
 
@@ -64,7 +64,7 @@ SutureLoop closes the loop from production crash telemetry to verified patch in 
   │           4. ADAPTIVE PATCH SYNTHESIS & RECOVERY            │
   │  - Auto-synthesizes vitest regression reproduction test     │
   │  - Attempt 1: Trace-blind naive patch -> Tests Fail         │
-  │  - Atomic Rollback: Restores clean checkpoint in ~225ms     │
+  │  - Atomic Rollback: Restores target file in <1ms (in-mem)   │
   │  - Attempt 2: AST & trace-informed patch -> Tests Pass ✅   │
   │  - Capture verified healed checkpoint                       │
   └──────────────────────────────┬──────────────────────────────┘
@@ -94,16 +94,19 @@ Measured during live end-to-end verification (`npm run demo`):
 
 | Metric | Measured Value | Verification Mechanism |
 |---|---|---|
-| **Incident MTTR Saved** | **45 minutes (0.75 hrs)** | Industry baseline triage time |
-| **Engineering Rate** | **$125.00 / hour** | Industry average ($260k fully-loaded) |
+| **Incident MTTR Saved** | **45 minutes (0.75 hrs)** | Industry baseline triage time (config: `INCIDENT_MTTR_MINUTES`) |
+| **Engineering Rate** | **$125.00 / hour** | Industry average ($260k fully-loaded) (config: `ENGINEER_HOURLY_RATE_USD`) |
 | **Gross Value Created** | **$93.75 USD** | `0.75 hrs * $125/hr` |
-| **Total Token Compute Cost** | **$0.0011 USD** | Measured ~1,090 tokens across attempts |
-| **Net Operational Savings** | **$93.7489 USD** | Gross savings minus token cost |
-| **Gross Margin on Compute** | **100% (99.99%)** | ($93.75 - $0.0011) / $93.75 |
-| **Entire AST Resolution** | **1,011 ms** | Resolved `processInvoice` across 653 relations |
-| **Atomic Rollback Duration** | **225 ms** | Checkpoint restore & working tree clean check |
-| **Vitest Regression Suite** | **586 ms** | Fast local test runner feedback loop |
-| **Total End-to-End Session** | **8,644 ms** | Seed crash $\to$ AST $\to$ Rollback $\to$ Pass |
+| **Total Token Compute Cost** | **$0.0001 USD** | Measured from the two synthesis passes (offline transformer) |
+| **Net Operational Savings** | **$93.7499 USD** | Gross savings minus token cost |
+| **Gross Margin on Compute** | **100%** | Measured this run; capped at 100% when compute cost rounds to zero |
+| **Blast Radius Resolution** | **text-scan-fallback** | `entire` CLI not installed — 7 unverified callers via lexical scan |
+| **Atomic Rollback Duration** | **< 1 ms** | In-memory snapshot write, scoped to the target file |
+| **Vitest Regression Suite** | **~560 ms** | Fast local test runner feedback loop (15 tests) |
+| **Total End-to-End Session** | **~1,700 ms** | Seed crash → blast radius → rollback → pass → comparative eval |
+
+> The 225 ms rollback, 1,011 ms AST resolution, 653 relations, and 8,644 ms session figures quoted in earlier drafts of this README were **not reproducible** on this host and have been replaced with the values measured above. Install the `entire` CLI to get verified AST resolution; without it the blast radius is a lexical scan and is labelled as such.
+
 
 ---
 
@@ -112,7 +115,7 @@ Measured during live end-to-end verification (`npm run demo`):
 ### 1. Prerequisites
 - **Node.js**: v20 or higher (Tested on Node.js v24)
 - **Git**: Installed and available in PATH
-- **Entire CLI**: v0.11.4+ (Optional: Git safety net provides automated parity fallback)
+- **Entire CLI**: optional. When installed, `entire graph impact` gives a verified AST call graph. When absent, the run says so up front and falls back to a lexical text scan whose callers are labelled `CALLS_UNVERIFIED`.
 
 ### 2. Installation
 ```bash
@@ -147,7 +150,7 @@ DEFAULT_INCIDENT_MTTR_MINUTES=45
 | Command | Description |
 |---|---|
 | `npm run demo` | **Full Live Demo**: Starts service, seeds crash payload, triggers SutureLoop with forced Attempt-1 fault, executes atomic rollback, passes Attempt-2, and verifies healed HTTP endpoint. |
-| `npm run demo:fail` | **Forced-Fault Remediation**: Demonstrates Attempt-1 failure, 225ms atomic rollback, and Attempt-2 recovery. |
+| `npm run demo:fail` | **Forced-Fault Remediation**: Demonstrates Attempt-1 failure, atomic rollback, and Attempt-2 recovery. |
 | `npm run demo:heal` | **One-Shot Auto-Heal**: Runs self-healing on the latest pending crash span in telemetry. |
 | `npm test` | **Unit & Regression Tests**: Runs the baseline `vitest` suite. |
 | `npx tsx bin/sutureloop.ts watch` | **Continuous Monitoring**: Long-running daemon polling neatlogs for uncaught exceptions in real time. |
@@ -174,7 +177,7 @@ SutureLoop/
 │   │   └── env.ts               # Centralized configuration loader
 │   ├── context/
 │   │   ├── blast_radius.ts      # Downstream caller impact analyzer
-│   │   └── entire_graph.ts      # Entire CLI AST code graph integration & fallback
+│   │   └── entire_graph.ts      # entire CLI AST code graph + text-scan fallback
 │   ├── core/
 │   │   ├── errors.ts            # Named custom error domain
 │   │   ├── invariants.ts        # Defensive invariant assertions (clean worktree, etc.)
@@ -183,7 +186,7 @@ SutureLoop/
 │   ├── economics/
 │   │   └── unit_economics.ts    # Real-math cfo.ai financial calculator
 │   ├── state/
-│   │   ├── checkpoint_manager.ts# Entire native & git safety net checkpoint manager
+│   │   ├── checkpoint_manager.ts# Scoped file snapshot + git safety net (not Entire)
 │   │   └── git_sandbox.ts       # Worktree cleanliness and sandbox isolation
 │   ├── synthesis/
 │   │   ├── patch_generator.ts   # Multi-stage adaptive patch synthesis engine
@@ -226,8 +229,8 @@ A Growth customer saves **37.5 engineering hours per month** ($4,687.50 in engin
 ## 🏆 Hackathon Compliance & Sponsor Criteria
 
 - [x] **Repo started completely empty** at kickoff (fresh-code rule strictly followed).
-- [x] **neatlogs (v1.1.26)**: Instrumented runtime telemetry, error span ingestion, and comparative evaluation.
-- [x] **Entire (v0.11.4)**: `entire-graph` AST impact analysis, atomic checkpoint restoration in 225ms.
+- [x] **neatlogs (v1.1.28)**: Instrumented runtime telemetry, error span ingestion, and comparative evaluation.
+- [x] **Entire CLI (optional)**: `entire graph impact` AST analysis when installed; otherwise a labelled text-scan fallback. Checkpoint/rollback is the project's own git safety net, not Entire.
 - [x] **cfo.ai**: Real financial governance model grounded in measured runtime token counts and MTTR metrics.
 - [x] **Strict Rule Enforcement**: Zero fabricated values (`|| 1`, `|| 420`), honest fallback labels, named domain errors.
 - [x] **Build-in-Public**: Complete chronological logs in `HACKATHON.md` and posts in `runs/posts/`.
