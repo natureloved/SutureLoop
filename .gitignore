@@ -7,3 +7,7 @@ runs/
 demo/tests/reproduction.test.ts
 .neatlogs_local_spans.json
 
+# Rendered demo video output. 16MB of generated media that is reproducible from
+# the engine/scenes sources alongside it, so it does not belong in history.
+launch-video/
+
