@@ -274,3 +274,51 @@ bug found while checking them. Test count 40 → 46.
 | `scripts/demo-idempotency-check.sh` | GREEN, 3 back-to-back runs |
 | Foreign process on the demo port | refused, with the reason; sandbox untouched |
 | `SUTURELOOP_INGEST_MODE=record-only` | span recorded, no file written |
+
+## 2026-10-15 · cfo.ai — make `model` measurable, and correct a false README claim
+
+The previous entry made `sutureloop model` refuse to print anything until a
+remediation had been recorded. That kept the honesty rule but made the cfo.ai
+surface look broken on a fresh clone: `runs/` is gitignored and empty, so a new
+checkout had never measured anything and the command produced an error-shaped
+refusal. Rule kept, UX fixed. Tests 46 -> 53.
+
+- **Plan and measurement are now separated.** Tier prices, included-fix counts
+  and the engineering value returned per incident ($93.75, from the configured
+  MTTR and rate) are business *inputs*, not measurements, so they always print.
+  Only the figures that would require an invented cost — cost per fix and the
+  margins derived from it — come back null and render as `pending measurement`.
+  The command now always returns a usable model and still claims nothing it
+  cannot back.
+- **`model --measure` makes the command self-contained.** With no ledger on
+  record it runs one real remediation against the sandbox (~2s, no API keys
+  needed) and reports from that. A judge can go from clone to real number in
+  one command.
+- **The ledger records a history, not a last value.** `last-run.json` kept one
+  figure per session and the newest won. Sessions are now appended to
+  `.git/sutureloop/measurements.json` (capped at 200, local, never committed —
+  a committed measurement file goes stale the moment the code changes) and the
+  model reports median and p95 across all of them, stamped with session id,
+  timestamp, and commit SHA. Median rather than mean: one expensive LLM-backed
+  run inside a set of cheap offline ones must not redefine the typical cost.
+- **Sessions are tagged by synthesis mode.** A patch produced by the local
+  AST-guided transformer spends no provider tokens; an LLM-backed one costs
+  roughly two orders of magnitude more. Each attempt now reports which path
+  produced it, the loop aggregates it, and `model` prints the composition. When
+  no LLM-backed session is on record the command says outright that the margins
+  exclude provider token cost and are an upper bound. Quoting one blended
+  "cost per fix" would have quietly overstated the offline path and understated
+  the hosted one.
+- **README corrected.** The repository structure and the hackathon checklist both
+  claimed `runs/posts/` held "public build-in-public milestone updates (Beats
+  1–5)". That directory is gitignored, empty, and has never been tracked. The
+  claim is removed rather than left standing, and `changelog.md` is listed in
+  its place as the actual append-only log.
+
+| Check | Result |
+|---|---|
+| `npx tsc --noEmit` | clean |
+| `npx vitest run` | 53/53 pass |
+| `model` with no ledger | full tier table, margins marked pending, exit clean |
+| `model --measure` | runs a remediation, then reports N=1 median $0.0001 at commit 2a144df |
+| `model` after two sessions | aggregates to N=2, median $0.0001, composition shown |

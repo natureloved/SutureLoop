@@ -9,9 +9,10 @@
  *   demo [--demo-force-fault]      : Run full end-to-end demo (seed crash -> heal -> verify)
  */
 
-import { SutureLoopOrchestrator, readMeasuredRun } from '../src/core/orchestrator.js';
+import { SutureLoopOrchestrator } from '../src/core/orchestrator.js';
 import { TelemetryService } from '../src/telemetry/neatlogs_client.js';
 import { generateBusinessModel } from '../src/economics/unit_economics.js';
+import { readMeasurements, summarizeMeasurements, describeBasis } from '../src/economics/measurements.js';
 import { config } from '../src/config/env.js';
 import { spawn } from 'child_process';
 import * as path from 'path';
@@ -39,9 +40,11 @@ Commands:
   auto-heal           Run one-shot remediation on the latest failure span
   watch               Poll neatlogs telemetry stream and auto-remediate live crashes
   demo                Execute end-to-end live demo (seed crash -> heal -> verify)
-  model               Print cfo.ai financial projections and subscription tier margins
+  model               Print the cfo.ai financial model from locally measured remediations
+  model --measure     Run one real remediation first, so the model has a measurement
 
 Options:
+  --measure, -m             (model only) produce a measurement before printing
   --demo-force-fault, -f   Force Attempt 1 to use the trace-blind strategy so the
                             rollback path is exercised, even when caller context is available
   --help, -h               Show this help message
@@ -251,42 +254,93 @@ async function runDemo() {
   }
 }
 
-function runModel() {
+/**
+ * cfo.ai financial model.
+ *
+ * The rule this command exists to enforce: never print a cost figure that was
+ * not measured on this host. But withholding the *whole* model over one missing
+ * number made the cfo.ai surface look broken on a fresh clone, so the output is
+ * split instead:
+ *
+ *   - plan inputs (tier prices, included fixes, engineering value returned)
+ *     are business decisions and always print;
+ *   - anything derived from the agent's own cost stays null and is labelled
+ *     pending until a real remediation has been measured.
+ *
+ * `--measure` runs one real remediation first, so the command is self-contained
+ * for someone who has never run the agent.
+ */
+async function runModel(args: string[]) {
   printBanner();
 
-  // The per-fix cost must come from a real run. An earlier version printed a
-  // hardcoded 0.0007 labelled "Measured", which is exactly the kind of
-  // fabricated figure this project claims not to publish.
-  const measuredRun = readMeasuredRun();
-  if (!measuredRun || !(measuredRun.measuredTokenCostUSD > 0)) {
-    console.log(`cfo.ai Financial Model & Subscription Unit Economics:`);
-    console.log(`\n  ! No measured remediation cost is on record.`);
-    console.log(`    Run 'npm run demo' or 'npm run demo:heal' first; this command reports`);
-    console.log(`    figures measured by that run and refuses to invent them.\n`);
-    return;
+  const wantsMeasurement = args.includes('--measure') || args.includes('-m');
+  let summary = summarizeMeasurements(readMeasurements());
+
+  if (!summary && wantsMeasurement) {
+    console.log(
+      `[Model] No remediation has been measured on this host. Running one now to ` +
+        `produce a real measurement...`
+    );
+    try {
+      await runAutoHeal();
+    } catch (err: any) {
+      console.warn(`[Model] The measurement run failed: ${err.message}`);
+    }
+    console.log('');
+    summary = summarizeMeasurements(readMeasurements());
   }
 
-  console.log(
-    `cfo.ai Financial Model & Subscription Unit Economics:\n` +
-      `  (cost per fix measured by session ${measuredRun.sessionId}, ` +
-      `${measuredRun.durationMs}ms, on ${new Date(measuredRun.recordedAt).toISOString()})`
-  );
-  const model = generateBusinessModel(measuredRun.measuredTokenCostUSD);
+  const model = generateBusinessModel(summary ? summary.medianUSD : null);
+
+  console.log(`cfo.ai Financial Model & Subscription Unit Economics:`);
+
+  console.log(`\n[Measurement basis]`);
+  if (summary) {
+    const fmt = (n: number) => `$${n.toFixed(4)}`;
+    console.log(`  Sessions recorded     : ${summary.count}`);
+    console.log(`  Cost per fix (median) : ${fmt(summary.medianUSD)}`);
+    console.log(`  Cost per fix (p95)    : ${fmt(summary.p95USD)}`);
+    console.log(`  Range observed        : ${fmt(summary.minUSD)} - ${fmt(summary.maxUSD)}`);
+    console.log(`  Window                : ${new Date(summary.firstRecordedAt).toISOString()} .. ` +
+      `${new Date(summary.lastRecordedAt).toISOString()}`);
+    if (summary.lastCommit) console.log(`  Last run at commit    : ${summary.lastCommit}`);
+    console.log(`  Composition           : ${describeBasis(summary)}`);
+    if (summary.byMode.llm === 0) {
+      console.log(
+        `  ! Every recorded session used the local AST-guided transformer, which spends no\n` +
+        `    provider tokens. Margins below therefore exclude LLM cost entirely; they are\n` +
+        `    an upper bound, not the cost of an LLM-backed deployment.`
+      );
+    }
+  } else {
+    console.log(`  ! No remediation has been measured on this host yet.`);
+    console.log(`    Tier margins are shown as pending rather than estimated from an assumed cost.`);
+    console.log(`    Run 'npx tsx bin/sutureloop.ts model --measure' to produce a real one.`);
+  }
 
   console.log(`\n[Per Incident]`);
-  console.log(`  - Measured Token Cost      : $${model.perIncident.measuredTokenCostUSD}`);
-  console.log(`  - Engineering MTTR Saved   : ${model.perIncident.mttrHoursSaved} hrs ($${model.perIncident.grossSavingsUSD})`);
-  console.log(`  - Net Value per Incident   : $${model.perIncident.netSavingsUSD}`);
-  console.log(`  - Gross Margin             : ${model.perIncident.grossMarginPercent}%`);
+  if (model.perIncident) {
+    const per = model.perIncident;
+    console.log(`  - Measured Token Cost      : $${per.measuredTokenCostUSD}`);
+    console.log(`  - Engineering MTTR Saved   : ${per.mttrHoursSaved} hrs ($${per.grossSavingsUSD})`);
+    console.log(`  - Net Value per Incident   : $${per.netSavingsUSD}`);
+    console.log(`  - Gross Margin             : ${per.grossMarginPercent}%`);
+  } else {
+    console.log(`  - Engineering MTTR Saved   : 0.75 hrs ($93.75)  [plan input, not a measurement]`);
+    console.log(`  - Net Value per Incident   : pending measurement`);
+  }
 
-  console.log(`\n[Monthly Team Projections (50 Incidents/Month)]`);
-  console.log(`  - Agent Operational Cost   : $${model.monthlyProjections.agentRunningCostUSD}`);
+  console.log(`\n[Monthly Team Projections (${model.monthlyProjections.incidentsPerMonth} Incidents/Month)]`);
   console.log(`  - Engineering Time Saved   : $${model.monthlyProjections.engineeringTimeSavedUSD}`);
-  console.log(`  - Net Monthly Savings      : $${model.monthlyProjections.netMonthlySavingsUSD}`);
+  console.log(`  - Agent Operational Cost   : ${model.monthlyProjections.agentRunningCostUSD === null ? 'pending measurement' : `$${model.monthlyProjections.agentRunningCostUSD}`}`);
+  console.log(`  - Net Monthly Savings      : ${model.monthlyProjections.netMonthlySavingsUSD === null ? 'pending measurement' : `$${model.monthlyProjections.netMonthlySavingsUSD}`}`);
 
   console.log(`\n[cfo.ai Subscription Tiers]`);
   for (const tier of model.subscriptionTiers) {
-    console.log(`  - ${tier.tierName.padEnd(25)} : $${tier.monthlyPriceUSD}/mo | Margin: ${tier.estimatedGrossMarginPercent}%`);
+    const margin = tier.estimatedGrossMarginPercent === null
+      ? 'margin: pending measurement'
+      : `margin: ${tier.estimatedGrossMarginPercent}%`;
+    console.log(`  - ${tier.tierName.padEnd(25)} : $${tier.monthlyPriceUSD}/mo | ${margin}`);
   }
 }
 
@@ -301,7 +355,7 @@ switch (command) {
     await runDemo();
     break;
   case 'model':
-    runModel();
+    await runModel(args);
     break;
   case '--help':
   case '-h':

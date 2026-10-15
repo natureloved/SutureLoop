@@ -10,48 +10,7 @@ import { Mutex } from './mutex.js';
 import { assertValidTargetFile, assertMeasuredMetric, assertCleanWorktree } from './invariants.js';
 import { GitHubPRClient } from '../github/pr_client.js';
 import { config } from '../config/env.js';
-import * as fs from 'fs';
-import * as path from 'path';
-
-/**
- * Where the last measured run is recorded.
- *
- * `sutureloop model` used to print a hardcoded `$0.0007` "measured" cost that
- * never came from a run. The number is now written here by every completed
- * session and read back by that command, so the financial model is anchored to
- * a real measurement or says it has none.
- */
-function measuredRunFile(): string {
-  return path.resolve(process.cwd(), '.git', 'sutureloop', 'last-run.json');
-}
-
-export function persistMeasuredRun(run: {
-  sessionId: string;
-  measuredTokenCostUSD: number;
-  durationMs: number;
-}): void {
-  const file = measuredRunFile();
-  try {
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(
-      file,
-      JSON.stringify({ ...run, recordedAt: Date.now() }, null, 2),
-      'utf-8'
-    );
-  } catch (err: any) {
-    console.warn(`[SutureLoop] Could not persist measured run metrics: ${err.message}`);
-  }
-}
-
-export function readMeasuredRun(): { sessionId: string; measuredTokenCostUSD: number; durationMs: number; recordedAt: number } | null {
-  const file = measuredRunFile();
-  try {
-    if (!fs.existsSync(file)) return null;
-    return JSON.parse(fs.readFileSync(file, 'utf-8'));
-  } catch {
-    return null;
-  }
-}
+import { recordMeasurement } from '../economics/measurements.js';
 
 export class SutureLoopOrchestrator {
   private telemetry: TelemetryService;
@@ -243,12 +202,14 @@ export class SutureLoopOrchestrator {
     console.log(`  ✓ Net Value per Incident : $${econ.netSavingsUSD}`);
     console.log(`  ✓ Gross Margin           : $${econ.grossMarginPercent}%`);
 
-    // Persist this run's measured figures so `sutureloop model` reports what
-    // was actually measured instead of a hardcoded constant.
-    persistMeasuredRun({
+    // Append this run to the local measurement ledger, stamped with the synthesis
+    // mode that produced the figure, so `sutureloop model` can report what was
+    // actually measured instead of a hardcoded constant.
+    recordMeasurement({
       sessionId,
       measuredTokenCostUSD: econ.measuredTokenCostUSD,
-      durationMs: Date.now() - startTime
+      durationMs: Date.now() - startTime,
+      mode: loopResult.synthesisMode
     });
 
     // 7. Automated Production Pull Request (if enabled / GITHUB_TOKEN set)

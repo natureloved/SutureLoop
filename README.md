@@ -192,7 +192,35 @@ effect rather than only at the entry:
 | `npm run demo:heal` | **One-Shot Auto-Heal**: Runs self-healing on the latest pending crash span. |
 | `npm test` | **Unit & Regression Tests**: Runs the baseline `vitest` suite. |
 | `npx tsx bin/sutureloop.ts watch` | **Continuous Monitoring**: Long-running daemon polling neatlogs for uncaught exceptions in real time. One remediation runs at a time, and the agent's own uncommitted patch is not mistaken for a developer's. |
-| `npx tsx bin/sutureloop.ts model` | **cfo.ai Financial Model**: Displays subscription unit economics from the cost **measured by the last real run**. Refuses to print figures when no run has been recorded. |
+| `npx tsx bin/sutureloop.ts model` | **cfo.ai Financial Model**: Prints the subscription plan. Every cost-derived figure comes from remediations measured on *this* host; anything not yet measured is labelled pending rather than estimated. |
+| `npx tsx bin/sutureloop.ts model --measure` | Runs one real remediation first, then prints the model — self-contained for a fresh clone. |
+
+### How the financial model decides what it may claim
+
+The cfo.ai surface is built around one rule: **no figure is printed unless it was
+measured on this host.** That creates a cold-start problem — a fresh clone has
+never run the agent, so there is nothing to measure. Rather than weaken the rule
+or fail the command, the output is split by what each number actually depends on:
+
+| Figure | Depends on a measurement? | Behaviour |
+|---|---|---|
+| Tier prices, included fixes | No — business inputs | Always printed |
+| Engineering value returned ($93.75/incident) | No — configured MTTR and rate | Always printed, labelled a plan input |
+| Agent cost per fix | **Yes** | Median + p95 across recorded sessions, or `pending measurement` |
+| Tier margins | **Yes** (derived from cost per fix) | Computed, or `pending measurement` |
+
+Sessions are additionally tagged by **how the patch was synthesised**. A session
+using the local AST-guided transformer spends no provider tokens at all, so its
+cost is roughly two orders of magnitude below an LLM-backed session. Reporting a
+single blended "cost per fix" would quietly overstate the offline path and
+understate the hosted one, so the command prints the composition and warns when
+no LLM-backed session is on record. Measurements live in `.git/sutureloop/`
+(local, never committed) because a committed measurement file goes stale the
+moment the code changes.
+
+The median is used rather than the mean for the same reason: one expensive
+LLM-backed run inside a set of cheap offline ones must not redefine what a
+typical fix costs.
 
 ---
 
@@ -244,8 +272,7 @@ SutureLoop/
 │       └── billing.test.ts      # Baseline regression test suite
 ├── docs/
 │   └── BUSINESS-PLAN.md         # Comprehensive cfo.ai financial plan & 18-month runway
-├── runs/
-│   └── posts/                   # Public build-in-public milestone updates (Beats 1–5)
+├── changelog.md                   # Append-only build log, including withdrawn figures
 ├── HACKATHON.md                 # Detailed hackathon build log, timings, & checklist
 ├── package.json
 └── tsconfig.json
@@ -274,7 +301,7 @@ A Growth customer saves **37.5 engineering hours per month** ($4,687.50 in engin
 - [x] **Entire CLI (v0.11.4) + `entire-graph` plugin (v0.4.0)**: `entire graph impact` AST resolution, measured at 1,403 ms across 1,206 relations / 5 verified callers. Checkpoint/rollback is the project's own git safety net, not Entire.
 - [x] **cfo.ai**: Real financial governance model grounded in measured runtime token counts and MTTR metrics.
 - [x] **Strict Rule Enforcement**: Zero fabricated values (`|| 1`, `|| 420`), honest fallback labels, named domain errors.
-- [x] **Build-in-Public**: Complete chronological logs in `HACKATHON.md` and posts in `runs/posts/`.
+- [x] **Build-in-Public**: Complete chronological log in `changelog.md` and `HACKATHON.md`. An earlier draft of this checklist pointed at `runs/posts/`; that directory is gitignored, empty, and was never tracked, so the claim has been corrected rather than left standing.
 
 ---
 

@@ -3,6 +3,7 @@ import * as path from 'path';
 import ts from 'typescript';
 import { FailureSpan, BlastRadiusReport } from '../core/types.js';
 import { PatchSynthesisFailed } from '../core/errors.js';
+import { SynthesisMode } from '../economics/measurements.js';
 import { config } from '../config/env.js';
 
 export interface GeneratedPatch {
@@ -11,6 +12,12 @@ export interface GeneratedPatch {
   rationale: string;
   tokenCount: number;
   costUSD: number;
+  /**
+   * Whether this patch consumed LLM tokens or was produced locally. Carried
+   * into the measurement ledger so a cost figure is never quoted without
+   * saying what produced it.
+   */
+  synthesisMode: SynthesisMode;
 }
 
 /**
@@ -198,7 +205,8 @@ export class PatchGenerator {
         originalCode: fileContent,
         rationale: 'Attempt 1 (Trace-blind): Shallow guard from the stack trace alone, without AST caller traversal.',
         tokenCount,
-        costUSD
+        costUSD,
+        synthesisMode: 'offline-transformer'
       };
     }
 
@@ -261,7 +269,8 @@ export class PatchGenerator {
                 originalCode: fileContent,
                 rationale: `Attempt ${attempt}: Autonomous LLM synthesized AST-aware null-safe patch (${model}).`,
                 tokenCount: totalTokens,
-                costUSD: cost
+                costUSD: cost,
+                synthesisMode: 'llm'
               };
             }
           }
@@ -301,9 +310,10 @@ export class PatchGenerator {
     return {
       patchCode: robustPatch,
       originalCode: fileContent,
-      rationale: `Attempt ${attempt}: Applied AST-guided safe property navigation with bounded fallback.`,
-      tokenCount,
-      costUSD
-    };
+rationale: `Attempt ${attempt}: Applied AST-guided safe property navigation with bounded fallback.`,
+    tokenCount,
+    costUSD,
+    synthesisMode: 'offline-transformer'
+  };
   }
 }

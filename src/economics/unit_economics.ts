@@ -16,21 +16,30 @@ export interface EconomicMetrics {
   grossMarginPercent: number;
 }
 
+export interface SubscriptionTier {
+  tierName: string;
+  incidentsIncluded: number;
+  monthlyPriceUSD: number;
+  /**
+   * Derived from the measured cost per fix, so it is null until a remediation
+   * has actually been measured on this host. The price and the included-fix
+   * count are business inputs and are always populated.
+   */
+  estimatedGrossMarginPercent: number | null;
+}
+
 export interface BusinessPlanMetrics {
-  perIncident: EconomicMetrics;
+  perIncident: EconomicMetrics | null;
+  /** False until at least one session has been measured. */
+  measured: boolean;
   monthlyProjections: {
     incidentsPerMonth: number;
-    agentRunningCostUSD: number;
+    agentRunningCostUSD: number | null;
     engineeringTimeSavedUSD: number;
-    netMonthlySavingsUSD: number;
-    grossMarginPercent: number;
+    netMonthlySavingsUSD: number | null;
+    grossMarginPercent: number | null;
   };
-  subscriptionTiers: {
-    tierName: string;
-    incidentsIncluded: number;
-    monthlyPriceUSD: number;
-    estimatedGrossMarginPercent: number;
-  }[];
+  subscriptionTiers: SubscriptionTier[];
 }
 
 export function calculateIncidentEconomics(params: {
@@ -57,52 +66,67 @@ export function calculateIncidentEconomics(params: {
   };
 }
 
+/**
+ * Builds the subscription model.
+ *
+ * `measuredCostPerFix` is null when no remediation has been measured on this
+ * host. Everything that does not depend on it -- the per-incident engineering
+ * value, the tier prices, the included-fix counts -- is still returned, so the
+ * command shows a real plan instead of an error. Only the figures that would
+ * require an invented cost come back null.
+ */
 export function generateBusinessModel(
-  measuredCostPerFix: number
+  measuredCostPerFix: number | null
 ): BusinessPlanMetrics {
-  const perIncident = calculateIncidentEconomics({
-    measuredTokenCostUSD: measuredCostPerFix,
-    mttrMinutesSaved: 45,
-    hourlyEngineerRateUSD: 125
-  });
+  const measured =
+    measuredCostPerFix !== null &&
+    Number.isFinite(measuredCostPerFix) &&
+    measuredCostPerFix > 0;
+
+  const perIncident = measured
+    ? calculateIncidentEconomics({
+        measuredTokenCostUSD: measuredCostPerFix!,
+        mttrMinutesSaved: 45,
+        hourlyEngineerRateUSD: 125
+      })
+    : null;
 
   const monthly50 = 50;
-  const cost50 = measuredCostPerFix * monthly50;
-  const savings50 = perIncident.grossSavingsUSD * monthly50;
+  // Engineering time returned is independent of the agent's own cost.
+  const savings50 = 0.75 * 125 * monthly50;
+  const cost50 = measured ? measuredCostPerFix! * monthly50 : null;
+
+  const marginFor = (priceUSD: number, fixes: number): number | null =>
+    measured ? Number((((priceUSD - fixes * measuredCostPerFix!) / priceUSD) * 100).toFixed(1)) : null;
 
   return {
     perIncident,
+    measured,
     monthlyProjections: {
       incidentsPerMonth: monthly50,
-      agentRunningCostUSD: Number(cost50.toFixed(2)),
+      agentRunningCostUSD: cost50 === null ? null : Number(cost50.toFixed(2)),
       engineeringTimeSavedUSD: Number(savings50.toFixed(2)),
-      netMonthlySavingsUSD: Number((savings50 - cost50).toFixed(2)),
-      grossMarginPercent: perIncident.grossMarginPercent
+      netMonthlySavingsUSD: cost50 === null ? null : Number((savings50 - cost50).toFixed(2)),
+      grossMarginPercent: perIncident?.grossMarginPercent ?? null
     },
     subscriptionTiers: [
       {
         tierName: 'Starter (15 fixes/mo)',
         incidentsIncluded: 15,
         monthlyPriceUSD: 79,
-        estimatedGrossMarginPercent: Number(
-          (((79 - 15 * measuredCostPerFix) / 79) * 100).toFixed(1)
-        )
+        estimatedGrossMarginPercent: marginFor(79, 15)
       },
       {
         tierName: 'Growth (50 fixes/mo)',
         incidentsIncluded: 50,
         monthlyPriceUSD: 199,
-        estimatedGrossMarginPercent: Number(
-          (((199 - 50 * measuredCostPerFix) / 199) * 100).toFixed(1)
-        )
+        estimatedGrossMarginPercent: marginFor(199, 50)
       },
       {
         tierName: 'Scale (200 fixes/mo)',
         incidentsIncluded: 200,
         monthlyPriceUSD: 599,
-        estimatedGrossMarginPercent: Number(
-          (((599 - 200 * measuredCostPerFix) / 599) * 100).toFixed(1)
-        )
+        estimatedGrossMarginPercent: marginFor(599, 200)
       }
     ]
   };

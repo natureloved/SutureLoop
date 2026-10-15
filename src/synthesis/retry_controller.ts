@@ -7,6 +7,7 @@ import { PatchGenerator } from './patch_generator.js';
 import { TestSynthesizer } from './test_synthesizer.js';
 import { PatchSynthesisFailed } from '../core/errors.js';
 import { config } from '../config/env.js';
+import { SynthesisMode } from '../economics/measurements.js';
 import { FailureSpan, BlastRadiusReport, PatchAttemptResult } from '../core/types.js';
 
 const execFileAsync = promisify(execFile);
@@ -17,6 +18,11 @@ export interface HealingLoopResult {
   success: boolean;
   /** Real id of the checkpoint that captured the healed state (or baseline). */
   checkpointId: string;
+  /**
+   * Whether this session spent LLM tokens. A session is 'llm' if *any* attempt
+   * went through a provider; the offline transformer spends none.
+   */
+  synthesisMode: SynthesisMode;
 }
 
 export class RetryController {
@@ -87,6 +93,7 @@ export class RetryController {
   ): Promise<HealingLoopResult> {
     const attempts: PatchAttemptResult[] = [];
     let totalTokenCostUSD = 0;
+    let synthesisMode: SynthesisMode = 'offline-transformer';
 
     // Normalise the budget: NaN from a malformed RETRY_LIMIT must not silently
     // become "unbounded" or "zero". At least one attempt always runs.
@@ -145,11 +152,12 @@ export class RetryController {
             await this.checkpointManager.restore(initialCheckpoint, targetFile);
             await this.checkpointManager.clearAppliedPatch(targetFile);
             await this.checkpointManager.pruneAll();
-            return { attempts, totalTokenCostUSD, success: false, checkpointId: initialCheckpoint };
+            return { attempts, totalTokenCostUSD, success: false, checkpointId: initialCheckpoint, synthesisMode };
           }
           throw err;
         }
         totalTokenCostUSD += patch.costUSD;
+        if (patch.synthesisMode === 'llm') synthesisMode = 'llm';
 
         // Apply patch.
         fs.writeFileSync(path.resolve(targetFile), patch.patchCode, 'utf-8');
@@ -195,7 +203,7 @@ export class RetryController {
           checkpointId = healedCheckpoint;
           console.log(`[RetryController] Healed state captured as checkpoint: ${healedCheckpoint}`);
           await this.checkpointManager.pruneAll();
-          return { attempts, totalTokenCostUSD, success: true, checkpointId: healedCheckpoint };
+          return { attempts, totalTokenCostUSD, success: true, checkpointId: healedCheckpoint, synthesisMode };
         }
 
         if (attempt < maxAttempts) {
@@ -211,7 +219,7 @@ export class RetryController {
       await this.checkpointManager.restore(initialCheckpoint, targetFile);
       await this.checkpointManager.clearAppliedPatch(targetFile);
       await this.checkpointManager.pruneAll();
-      return { attempts, totalTokenCostUSD, success: false, checkpointId: initialCheckpoint };
+      return { attempts, totalTokenCostUSD, success: false, checkpointId: initialCheckpoint, synthesisMode };
     } catch (err: any) {
       // Guarantee rollback on unhandled synthesis exceptions.
       console.error(`[RetryController] Unhandled error during healing: ${err.message}. Performing emergency rollback...`);
