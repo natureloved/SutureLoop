@@ -370,13 +370,28 @@ app.post('/api/v1/incidents/ingest', requireWebhookAuth, async (req: Request, re
   await telemetry.recordLocalFailureSpan(span);
   console.log(`[Ingest Webhook] Intercepted runtime exception from ${span.service} (Trace: ${traceId})`);
 
+  // Recording an incident and mutating a source file are different blast
+  // radii. In record-only mode an inbound HTTP request is never enough to
+  // trigger the latter.
+  const mutationAuthorized = config.ingestMode === 'auto-heal';
+
   // Respond immediately with 202 Accepted so caller is not delayed
   res.status(202).json({
     accepted: true,
     traceId,
     service: span.service,
-    message: 'Incident ingested into SutureLoop autonomous operational pipeline'
+    remediation: mutationAuthorized ? 'scheduled' : 'recorded-only',
+    message: mutationAuthorized
+      ? 'Incident ingested into SutureLoop autonomous operational pipeline'
+      : 'Incident recorded. SUTURELOOP_INGEST_MODE=record-only, so no source file was modified.'
   });
+
+  if (!mutationAuthorized) {
+    console.log(
+      `[Ingest Webhook] SUTURELOOP_INGEST_MODE=record-only: ${traceId} recorded but not remediated.`
+    );
+    return;
+  }
 
   // Run healing asynchronously in the background
   (async () => {
@@ -392,27 +407,97 @@ app.post('/api/v1/incidents/ingest', requireWebhookAuth, async (req: Request, re
 });
 
 app.get('/health', (_req: Request, res: Response) => {
-  res.json({ status: 'ok', service: 'billing-service' });
+  res.json({ status: 'ok', service: 'billing-service', id: SERVICE_ID });
 });
 
-export function startServer(port = config.port) {
-  const server = app.listen(port, () => {
-    console.log(`[Server] Billing microservice listening on http://localhost:${port}`);
+/** Stable identity this app answers `/health` with, used to detect a port squatter. */
+const SERVICE_ID = 'sutureloop-billing-service';
+
+/**
+ * Decides whether the process already holding `port` is another instance of
+ * *this* app, or some unrelated application.
+ *
+ * The previous handler logged "Utilizing active service instance" for any
+ * EADDRINUSE. That asserts ownership it never verified: a stranger on the port
+ * made the demo POST its crash payload to an unrelated service and then report
+ * a successful "live re-issue" against that stranger's endpoint.
+ */
+async function claimExistingInstance(port: number): Promise<{ claimed: boolean; why: string }> {
+  try {
+    const res = await fetch(`http://localhost:${port}/health`, {
+      signal: AbortSignal.timeout(2000)
+    });
+    if (!res.ok) return { claimed: false, why: `/health returned HTTP ${res.status}` };
+    const body: any = await res.json();
+    if (body?.id === SERVICE_ID) return { claimed: true, why: '' };
+    return {
+      claimed: false,
+      why: `the service there identifies as ${JSON.stringify(body?.service ?? 'unknown')}, not ${SERVICE_ID}`
+    };
+  } catch (err: any) {
+    return { claimed: false, why: err?.message || String(err) };
+  }
+}
+
+export interface ServerHandle {
+  /** The bound listener, or null when an existing SutureLoop instance was reused. */
+  server: import('http').Server | null;
+  /** True when another SutureLoop instance already owned the port. */
+  reused: boolean;
+}
+
+/**
+ * Starts the service and resolves only once it is actually accepting requests.
+ *
+ * Resolving on `listening` (rather than after a sleep) is what makes the
+ * EADDRINUSE claim safe: by the time this returns, either we own the port or
+ * we have verified the existing owner is us.
+ */
+export function startServer(port = config.port): Promise<ServerHandle> {
+  return new Promise<ServerHandle>((resolve, reject) => {
+    const server = app.listen(port);
+
+    server.once('error', (err: any) => {
+      if (err.code === 'EADDRINUSE') {
+        void claimExistingInstance(port).then(({ claimed, why }) => {
+          if (claimed) {
+            console.log(`[Server] Port ${port} is already served by another SutureLoop instance; reusing it.`);
+            resolve({ server: null, reused: true });
+          } else {
+            server.close();
+            reject(
+              new Error(
+                `Port ${port} is held by another application (${why}). ` +
+                  `Refusing to start rather than demo against an endpoint that is not ours. ` +
+                  `Set PORT to a free port and retry.`
+              )
+            );
+          }
+        });
+        return;
+      }
+      server.close();
+      reject(err);
+    });
+
+    server.once('listening', () => {
+      server.removeAllListeners('error');
+      server.on('error', (err: any) => {
+        console.error(`[Server Error] ${err.message}`);
+      });
+      console.log(`[Server] Billing microservice listening on http://localhost:${port}`);
+      resolve({ server, reused: false });
+    });
   });
-  server.on('error', (err: any) => {
-    if (err.code === 'EADDRINUSE') {
-      console.log(`[Server] Port ${port} is already active. Utilizing active service instance.`);
-    } else {
-      console.error(`[Server Error] ${err.message}`);
-    }
-  });
-  return server;
 }
 
 // Self-start if executed directly (cross-platform comparison for Linux, Docker, Windows, and macOS)
 const executedFilePath = process.argv[1] ? path.resolve(process.argv[1]) : '';
 if (executedFilePath && path.resolve(__filename) === executedFilePath) {
-  startServer();
+  startServer().catch((err: any) => {
+    console.error(`[Server] Failed to start: ${err.message}`);
+    process.exitCode = 1;
+  });
 }
 
 export default app;

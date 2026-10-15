@@ -29,8 +29,8 @@ SutureLoop closes the loop from production crash telemetry to verified patch in 
 1. **Telemetry Ingestion (`neatlogs`)**: Intercepts uncaught runtime exception spans, extracting exact source files, line numbers, and call stacks.
 2. **AST Blast Radius Resolution (`entire` CLI v0.11.4 + `entire-graph` v0.4.0)**: Runs `entire graph impact` to deterministically discover all AST callers, consumers, and affected endpoints before synthesizing any patch. Measured on this host: **5 verified callers** across **1,206 relations** in **1,403 ms**. When the `entire` CLI is not installed the run says so up front and falls back to a lexical text scan whose callers are labelled `CALLS_UNVERIFIED` — it never presents a grep as an AST call graph.
 3. **Atomic Checkpoint & Rollback (Git Safety Net)**: Captures a snapshot of the remediation target before mutation, fenced to that one file. If Attempt 1 fails the auto-synthesized test suite, SutureLoop restores just that file and verifies the workspace is otherwise untouched. On this host the restore is an in-memory write measured at **<1 ms** (the 225 ms figure quoted in earlier drafts was not reproducible and has been withdrawn).
-4. **Adaptive Patch Synthesis & Vitest Verification**: Synthesizes a strict regression test and applies an AST-informed null-safe fix.
-5. **Comparative Trace Evaluation (`neatlogs`)**: Re-evaluates post-fix telemetry, asserting error reduction from **1 → 0** with side-by-side dashboard audit URLs. A `VERIFIED_PASS` requires **both** a clean healed span **and** a confirmed live replay of the original failing request; the demo reports which layer produced the verdict via `verifiedBy`.
+4. **Adaptive Patch Synthesis & Vitest Verification**: Synthesizes a strict regression test and applies an AST-informed null-safe fix. The test is derived from the incident — it imports the actual target module and calls the actual crashing export; it is not a fixed template. Attempt 1 uses the trace-blind strategy when the operator asks for it or when there is no caller context to learn from, and the context-informed strategy otherwise, so no run stages a failure it did not need to stage. An LLM-authored patch must parse as TypeScript before it is allowed to overwrite the target.
+5. **Comparative Trace Evaluation (`neatlogs`)**: Re-evaluates post-fix telemetry, asserting error reduction from **1 → 0** with side-by-side dashboard audit URLs. A `VERIFIED_PASS` requires **both** a clean healed span **and** a confirmed live replay of the original failing request; the demo reports which layer produced the verdict via `verifiedBy`. A clean healed span with no live replay is reported as `VERIFICATION_INCOMPLETE`, not as a regression.
 6. **Financial Governance (`cfo.ai`)**: Computes measured token costs against engineering hours saved, proving a **>99% gross margin** per automated remediation. Figures below are measured, not projected.
 
 ---
@@ -145,7 +145,41 @@ OPENROUTER_API_KEY=your_openrouter_key
 # Operational Constants
 DEFAULT_ENGINEER_HOURLY_RATE=125
 DEFAULT_INCIDENT_MTTR_MINUTES=45
+
+# Attempt budget (default 2). A malformed value falls back to the default
+# rather than silently disabling the bound.
+RETRY_LIMIT=2
+# A hung test run must fail its attempt, not freeze the agent.
+REGRESSION_TEST_TIMEOUT_MS=120000
+
+# What POST /api/v1/incidents/ingest may do with an inbound span.
+#   auto-heal   (default) record it and remediate immediately
+#   record-only record it and stop -- an HTTP request can never cause a
+#               source file to be rewritten
+SUTURELOOP_INGEST_MODE=auto-heal
+
+# Inbound incident webhook. When set, remote callers must present it as
+# `x-sutureloop-secret` (or a Bearer token); loopback callers are allowed
+# through only while no secret is configured.
+SUTURELOOP_WEBHOOK_SECRET=
+
+# Off by default. When enabled, a successful heal is committed on a branch and
+# pushed. The target is re-checked against the remediation boundary immediately
+# before staging, so a path outside the sandbox can never reach origin.
+ENABLE_REMOTE_PR=false
+GITHUB_TOKEN=
 ```
+
+### Security boundaries
+
+Three independent guards, each enforced at the last point before its side
+effect rather than only at the entry:
+
+| Boundary | Enforced in |
+|---|---|
+| The agent cannot mutate its own source, config, or anything outside `demo/` | `assertValidTargetFile`, re-checked in `pr_client` before staging |
+| An inbound HTTP request cannot cause a file write unless remediation is explicitly authorised | `SUTURELOOP_INGEST_MODE` on `/api/v1/incidents/ingest` |
+| The demo never runs against a service that is not this one | `startServer` probes `/health` and aborts on `EADDRINUSE` from a stranger |
 
 ---
 
@@ -154,11 +188,11 @@ DEFAULT_INCIDENT_MTTR_MINUTES=45
 | Command | Description |
 |---|---|
 | `npm run demo` | **Full Live Demo**: Starts service, seeds crash payload, triggers SutureLoop with forced Attempt-1 fault, executes atomic rollback, passes Attempt-2, and verifies healed HTTP endpoint. |
-| `npm run demo:fail` | **Forced-Fault Remediation**: Demonstrates Attempt-1 failure, atomic rollback, and Attempt-2 recovery. |
-| `npm run demo:heal` | **One-Shot Auto-Heal**: Runs self-healing on the latest pending crash span in telemetry. |
+| `npm run demo:fail` | **Forced-Fault Remediation**: Pins Attempt 1 to the trace-blind strategy so the rollback path is exercised. |
+| `npm run demo:heal` | **One-Shot Auto-Heal**: Runs self-healing on the latest pending crash span. |
 | `npm test` | **Unit & Regression Tests**: Runs the baseline `vitest` suite. |
-| `npx tsx bin/sutureloop.ts watch` | **Continuous Monitoring**: Long-running daemon polling neatlogs for uncaught exceptions in real time. |
-| `npx tsx bin/sutureloop.ts model` | **cfo.ai Financial Model**: Displays subscription unit economics, monthly team savings, and tier margins. |
+| `npx tsx bin/sutureloop.ts watch` | **Continuous Monitoring**: Long-running daemon polling neatlogs for uncaught exceptions in real time. One remediation runs at a time, and the agent's own uncommitted patch is not mistaken for a developer's. |
+| `npx tsx bin/sutureloop.ts model` | **cfo.ai Financial Model**: Displays subscription unit economics from the cost **measured by the last real run**. Refuses to print figures when no run has been recorded. |
 
 ---
 
@@ -178,26 +212,29 @@ SutureLoop/
 │   └── sutureloop.ts            # Unified CLI entrypoint (demo, auto-heal, watch, model)
 ├── src/
 │   ├── config/
-│   │   └── env.ts               # Centralized configuration loader
+│   │   └── env.ts               # Centralized configuration loader (validated numerics)
 │   ├── context/
 │   │   ├── blast_radius.ts      # Downstream caller impact analyzer
 │   │   └── entire_graph.ts      # entire CLI AST code graph + text-scan fallback
 │   ├── core/
 │   │   ├── errors.ts            # Named custom error domain
 │   │   ├── invariants.ts        # Defensive invariant assertions (clean worktree, etc.)
+│   │   ├── mutex.ts             # Serialises concurrent remediation sessions
 │   │   ├── orchestrator.ts      # Core pipeline coordinator
 │   │   └── types.ts             # Strongly-typed domain definitions
 │   ├── economics/
 │   │   └── unit_economics.ts    # Real-math cfo.ai financial calculator
 │   ├── state/
+│   │   ├── applied_patches.ts   # Content-addressed record of agent-authored patches
 │   │   ├── checkpoint_manager.ts# Scoped file snapshot + git safety net (not Entire)
 │   │   └── git_sandbox.ts       # Worktree cleanliness and sandbox isolation
 │   ├── synthesis/
 │   │   ├── patch_generator.ts   # Multi-stage adaptive patch synthesis engine
 │   │   ├── retry_controller.ts  # Bounded retry loop (Attempt 1 -> Rollback -> Attempt 2)
-│   │   └── test_synthesizer.ts  # Automated reproduction test generator
+│   │   └── test_synthesizer.ts  # Reproduction test generator, derived from the span
 │   └── telemetry/
 │       ├── neatlogs_client.ts   # neatlogs SDK integration & comparative trace eval
+│       ├── session_tracer.ts    # Workflow trace over the whole healing session
 │       └── trace_interceptor.ts # Runtime stack trace parser
 ├── demo/
 │   ├── service/

@@ -135,3 +135,142 @@ Format: date (UTC) · phase · what changed · measured result.
 | Rollback | < 1 ms, scoped to target file |
 | End-to-end session | ~1,800 ms |
 | `npm audit` | 14 (0 critical, 4 high) |
+
+## 2026-10-15 · Correctness review — 14 defects fixed
+
+A review pass over the healing pipeline found fourteen real defects. The demo
+still passed throughout; that is exactly the problem — none of these were
+visible from the outside, and several of them could destroy a developer's work
+or write broken code into a file. Test count went 15 → 40.
+
+### Data loss / safety
+
+- **`pruneAll()` force-deleted the user's own branches.** It swept
+  `git branch --list 'cp_*'` and ran `git branch -D` on every match, so a branch
+  named `cp-hotfix` was destroyed on the first successful heal. Cleanup is now
+  scoped to refs this process actually minted.
+- **Watch mode could heal exactly one incident per process.** A successful heal
+  leaves the patched target uncommitted, which the safety gate then read as
+  "uncommitted work at risk" and refused. Added `src/state/applied_patches.ts`:
+  a content-addressed record of what the agent itself wrote, kept under `.git/`
+  so it never appears as project state. The exemption dies the instant a
+  developer edits on top of the patch, re-arming the gate. Verified by running
+  `auto-heal` twice back to back: the second run previously refused, now heals.
+- **The PR flow left the repo on the fix branch**, and since
+  `restoreCrashBaseline()` reads `git show HEAD:<file>`, that made the *next*
+  `npm run demo` seed a patched file and fail its own precondition. The branch
+  is now captured before checkout and restored in a `finally`.
+
+### Wrong code written
+
+- **The AST-guided transformer corrupted any line that was not a single bare
+  member chain.** `return invoice.rate * 1.5` became
+  `return invoice?.rate ?? "Unknown City" * 1.5` — the fallback bound tighter
+  than the multiplication, turning a null guard into a value substitution. The
+  member regex also matched numeric literals, rewriting `1.5` to `1?.5`. Chains
+  are now parenthesised, the fallback is applied once to the whole returned
+  expression, the regex must start with an identifier, and chains inside string
+  literals are left alone.
+- **An LLM patch was accepted if the reply merely mentioned the target
+  function name** — prose or a diff would overwrite the source file. It must now
+  parse as TypeScript (`ts.createSourceFile` diagnostics) first.
+
+### Verification honesty
+
+- **A successful heal was reported as `REGRESSION_DETECTED`.** The verdict was
+  `healedErrors === 0 && liveReplaySucceeded`, so a clean heal with no service
+  listening (every CLI `auto-heal`) fell into the else branch. Added
+  `VERIFICATION_INCOMPLETE`. The neatlogs-CLI layer also ignored the live-replay
+  requirement entirely and disagreed with the local layer; both now use one rule.
+- **The regression test was a fixed template** that always imported
+  `processInvoice` from `demo/service/routes/billing.ts` regardless of the span,
+  so a suite for any other incident tested the wrong module. It is now derived
+  from the incident, and declines to synthesize (reporting FAILED rather than a
+  false pass) when the span names no exported symbol or the module has
+  import-time side effects.
+- **`checkpointId` was the literal string `'cp_latest'`** in every result,
+  violating the project's own no-fabricated-values rule. The real id is
+  returned now.
+- **`sutureloop model` printed a hardcoded `$0.0007` "measured" cost.** Every
+  session now persists its measured figures and the command reads them back,
+  refusing to print a model when no run is on record.
+
+### Concurrency, timeouts, dead code
+
+- Concurrent remediations (CLI + watch + the background webhook) rewrote the
+  same file and raced on the telemetry queue, whose read-append-write lost
+  spans. Added `src/core/mutex.ts`; sessions and queue writes are serialised.
+- **`runTests` had no timeout** — a hung vitest run froze the autonomous loop,
+  defeating the bounded-retry guarantee. Now `execFile` with a hard timeout;
+  a killed run fails the attempt like any other failure.
+- **`--demo-force-fault` was a no-op.** Its code sat after an unconditional
+  `return`, so it was unreachable. Attempt 1 is now blind when forced *or* when
+  there is genuinely no caller context, and informed otherwise — so a normal run
+  no longer stages a failure it did not need to stage.
+- `RETRY_LIMIT=5` silently meant 2; a malformed value produced `NaN` and
+  disabled the bound. Numeric env vars are now validated with a documented
+  fallback, and the default is 2 (matching the documented loop).
+- `neatlogs.init` was called once per process, so a server whose first run had
+  no API key stayed pinned to `disableExport: true` and silently dropped
+  telemetry for every later run.
+- `stageSpan` was exported and never called; the orchestrator now actually
+  emits the stage chain the README documents. Unused `GitSandbox` /
+  `generateBusinessModel` imports removed.
+- Boundary check used a bare `startsWith('demo')`, which also admitted a sibling
+  directory such as `demo-secrets/`; now matched on whole path segments.
+- The telemetry queue grew without bound; capped at 500 spans.
+- The failing property name is interpolated into a `RegExp` from an error
+  message — untrusted input — and is now escaped.
+
+### Current measured state
+
+| Check | Result |
+|---|---|
+| `npx tsc --noEmit` | clean |
+| `npx vitest run` | 40/40 pass |
+| `npm run demo` | HEALED, Errors Delta 1 → 0, `local-spans+live-replay` |
+| End-to-end session | 1,976 ms |
+| Sandbox after demo | byte-identical to HEAD; no `cp_*` branches or refs left behind |
+
+## 2026-10-15 · Hardening — three claims the code could not back
+
+A follow-up pass on the two areas flagged during the review, plus one latent
+bug found while checking them. Test count 40 → 46.
+
+- **The demo could run against a service that was not ours.** On `EADDRINUSE`
+  the server logged `"Utilizing active service instance"` and carried on,
+  asserting an ownership it never checked. With any other process on the port
+  the demo POSTed its crash payload to a stranger's API, then reported
+  `✓ Live Re-issue Succeeded` against that stranger's endpoint. `startServer`
+  now probes `/health` and refuses to start unless the existing owner
+  identifies as `sutureloop-billing-service`. Verified live: with a foreign
+  server on :3000 the demo aborts with the reason and the sandbox is untouched;
+  with a second SutureLoop instance it correctly reuses it.
+- **`startServer` resolved on a `setTimeout(1000)` instead of on `listening`.**
+  It now returns a promise that settles when the port is genuinely ours, which
+  is what makes the ownership claim above safe.
+- **The path was fenced; the push was not.** `pr_client` received `targetFile`
+  as a payload field and `git add`-ed it without re-checking it. With
+  `ENABLE_REMOTE_PR=true` a span that reached that client by any route could be
+  staged and pushed to origin. The boundary is now re-asserted immediately
+  before staging, and the client refuses with `TARGET_OUTSIDE_REMEDIATION_BOUNDARY`.
+- **Recording an incident and mutating a source file shared one switch.**
+  `/api/v1/incidents/ingest` now honours `SUTURELOOP_INGEST_MODE`. In
+  `record-only` an inbound HTTP request is recorded and nothing else happens —
+  verified live: the span is accepted, `remediation: "recorded-only"` is
+  returned, and `demo/service/routes/billing.ts` is byte-identical afterwards.
+  Default stays `auto-heal`, which is the documented behaviour.
+- **The bundled middleware could not authenticate.** It posted to the ingest
+  endpoint with only `Content-Type`, never sending `x-sutureloop-secret`, and
+  never checked the response status. The first time an operator configured a
+  secret, every forwarded crash was rejected with 401 and nothing was logged —
+  telemetry simply stopped. It now forwards the configured secret and reports
+  the status code and body of a rejected ingest.
+
+| Check | Result |
+|---|---|
+| `npx tsc --noEmit` | clean |
+| `npx vitest run` | 46/46 pass |
+| `scripts/demo-idempotency-check.sh` | GREEN, 3 back-to-back runs |
+| Foreign process on the demo port | refused, with the reason; sandbox untouched |
+| `SUTURELOOP_INGEST_MODE=record-only` | span recorded, no file written |

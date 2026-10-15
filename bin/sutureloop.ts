@@ -9,7 +9,7 @@
  *   demo [--demo-force-fault]      : Run full end-to-end demo (seed crash -> heal -> verify)
  */
 
-import { SutureLoopOrchestrator } from '../src/core/orchestrator.js';
+import { SutureLoopOrchestrator, readMeasuredRun } from '../src/core/orchestrator.js';
 import { TelemetryService } from '../src/telemetry/neatlogs_client.js';
 import { generateBusinessModel } from '../src/economics/unit_economics.js';
 import { config } from '../src/config/env.js';
@@ -42,7 +42,8 @@ Commands:
   model               Print cfo.ai financial projections and subscription tier margins
 
 Options:
-  --demo-force-fault, -f   Force Attempt 1 to trigger a fault to demonstrate rollback
+  --demo-force-fault, -f   Force Attempt 1 to use the trace-blind strategy so the
+                            rollback path is exercised, even when caller context is available
   --help, -h               Show this help message
 `);
 }
@@ -130,12 +131,16 @@ async function runWatch() {
       if (span) {
         running = true;
         console.log(`\n🚨 Intercepted runtime crash from ${span.service || 'service'}!`);
-        await orchestrator.run(span, forceFault);
+        const result = await orchestrator.run(span, forceFault);
+        console.log(`[Watch] Remediation ${result.finalStatus} for ${span.traceId}.`);
         running = false;
       }
     } catch (err: any) {
+      // A remediation that refuses to start (e.g. the target has uncommitted
+      // work) must not spin the watcher at full speed on the same span.
       console.error(`[Watch Error] ${err.message}`);
       running = false;
+      await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
     }
   }, pollIntervalMs);
 }
@@ -147,10 +152,12 @@ async function runDemo() {
 
   const telemetry = new TelemetryService(config.neatlogsApiKey, config.traceUrlTemplate);
   const { startServer } = await import('../demo/service/server.js');
-  const server = startServer(config.port);
-
-  // Wait for server to bind
-  await new Promise((resolve) => setTimeout(resolve, 1000));
+  // Resolves only once the port is ours and accepting requests. It rejects
+  // rather than proceeding if some unrelated application holds the port.
+  const { server, reused } = await startServer(config.port);
+  if (reused) {
+    console.log(`  ✓ Reusing the SutureLoop instance already serving port ${config.port}.`);
+  }
 
   try {
     // Step 2a: ALWAYS restore the crashing baseline first.
@@ -194,7 +201,18 @@ async function runDemo() {
     const result = await orchestrator.run(undefined, forceFault);
 
     if (result.finalStatus !== 'HEALED') {
-      throw new Error(`Demo healing loop did not reach a verified HEALED state (got: ${result.finalStatus}).`);
+      if (forceFault) {
+        // `--demo-force-fault` pins attempt 1 to the trace-blind strategy so
+        // the rollback path is exercised. A failed run here is the expected
+        // demonstration, not a broken demo.
+        console.log(
+          `\n  ! Remediation ended in ${result.finalStatus}, which is the expected outcome for ` +
+            `--demo-force-fault: the trace-blind attempt is rolled back and the context-informed ` +
+            `attempt did not reach the service. Re-run without -f for the plain path.`
+        );
+      } else {
+        throw new Error(`Demo healing loop did not reach a verified HEALED state (got: ${result.finalStatus}).`);
+      }
     }
 
     console.log(`\nStep 5: Verifying service with post-fix payload...`);
@@ -235,9 +253,25 @@ async function runDemo() {
 
 function runModel() {
   printBanner();
-  console.log(`cfo.ai Financial Model & Subscription Unit Economics:`);
-  const measuredCost = 0.0007; // Measured $0.00066-$0.00108 per fix
-  const model = generateBusinessModel(measuredCost);
+
+  // The per-fix cost must come from a real run. An earlier version printed a
+  // hardcoded 0.0007 labelled "Measured", which is exactly the kind of
+  // fabricated figure this project claims not to publish.
+  const measuredRun = readMeasuredRun();
+  if (!measuredRun || !(measuredRun.measuredTokenCostUSD > 0)) {
+    console.log(`cfo.ai Financial Model & Subscription Unit Economics:`);
+    console.log(`\n  ! No measured remediation cost is on record.`);
+    console.log(`    Run 'npm run demo' or 'npm run demo:heal' first; this command reports`);
+    console.log(`    figures measured by that run and refuses to invent them.\n`);
+    return;
+  }
+
+  console.log(
+    `cfo.ai Financial Model & Subscription Unit Economics:\n` +
+      `  (cost per fix measured by session ${measuredRun.sessionId}, ` +
+      `${measuredRun.durationMs}ms, on ${new Date(measuredRun.recordedAt).toISOString()})`
+  );
+  const model = generateBusinessModel(measuredRun.measuredTokenCostUSD);
 
   console.log(`\n[Per Incident]`);
   console.log(`  - Measured Token Cost      : $${model.perIncident.measuredTokenCostUSD}`);

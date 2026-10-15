@@ -1,5 +1,6 @@
 import { execFile } from 'child_process';
 import { promisify } from 'util';
+import { assertValidTargetFile } from '../core/invariants.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -46,9 +47,34 @@ export class GitHubPRClient {
       return { branch, skipped: true, reason: 'GITHUB_TOKEN_NOT_CONFIGURED' };
     }
 
+    // Re-assert the remediation boundary here, at the last point before the
+    // irreversible side effect. Upstream callers already validate the target,
+    // but `targetFile` arrives here as a payload field: without this fence a
+    // path that reached this client by any other route could be staged and
+    // pushed to origin, which is a far worse outcome than a local edit.
     try {
+      assertValidTargetFile(payload.targetFile);
+    } catch (err: any) {
+      console.warn(`[GitHub] Refusing to push: ${err.message}`);
+      return { branch, skipped: true, reason: 'TARGET_OUTSIDE_REMEDIATION_BOUNDARY' };
+    }
+
+    let startingBranch: string | null = null;
+    try {
+      // Remember where we were. Committing on a new branch moves HEAD, and the
+      // demo sandbox restores its crash baseline from `git show HEAD:<file>`.
+      // Leaving HEAD on the fix commit made "reset baseline" write back the
+      // *patched* file, so the next `npm run demo` seeded no crash at all.
+      const { stdout: originalBranch } = await execFileAsync('git', ['rev-parse', '--abbrev-ref', 'HEAD']);
+      startingBranch = originalBranch.trim();
+
       console.log(`[GitHub] Checking out remediation branch: ${branch}...`);
-      await execFileAsync('git', ['checkout', '-b', branch]);
+      try {
+        await execFileAsync('git', ['checkout', '-b', branch]);
+      } catch {
+        // Branch already exists from a previous run: reuse it rather than fail.
+        await execFileAsync('git', ['checkout', branch]);
+      }
       // Scope addition STRICTLY to the remediated target file, never repo-wide add -A
       await execFileAsync('git', ['add', '--', payload.targetFile]);
       await execFileAsync('git', [
@@ -110,6 +136,20 @@ export class GitHubPRClient {
     } catch (err: any) {
       console.warn(`[GitHub Error] ${err.message}`);
       return { branch, skipped: true, reason: err.message };
+    } finally {
+      // Always hand the working tree back to the branch we started on, so the
+      // caller's HEAD (and therefore the demo's baseline restore) is unchanged.
+      if (startingBranch && startingBranch !== branch) {
+        try {
+          await execFileAsync('git', ['checkout', startingBranch]);
+          console.log(`[GitHub] Returned to '${startingBranch}'.`);
+        } catch (backErr: any) {
+          console.warn(
+            `[GitHub] Could not return to '${startingBranch}': ${backErr.message}. ` +
+              `You are on '${branch}' -- switch back manually.`
+          );
+        }
+      }
     }
   }
 }

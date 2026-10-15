@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import ts from 'typescript';
 import { FailureSpan, BlastRadiusReport } from '../core/types.js';
 import { PatchSynthesisFailed } from '../core/errors.js';
 import { config } from '../config/env.js';
@@ -10,6 +11,101 @@ export interface GeneratedPatch {
   rationale: string;
   tokenCount: number;
   costUSD: number;
+}
+
+/**
+ * A member-expression chain that starts with a real identifier.
+ *
+ * The leading `[A-Za-z_$]` matters: an earlier version used
+ * `[a-zA-Z0-9_]+(\.[a-zA-Z0-9_]+)+`, which also matched the numeric literal in
+ * `1.5` and rewrote it to `1?.5`.
+ */
+const MEMBER_CHAIN = /[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)+/g;
+
+/** Ranges (as [start, end) offsets) covered by a quoted literal on a line. */
+function quotedRanges(line: string): Array<[number, number]> {
+  const ranges: Array<[number, number]> = [];
+  let quote: string | null = null;
+  let start = -1;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '\\') { i++; continue; }
+    if (quote === null && (ch === '"' || ch === "'" || ch === '`')) {
+      quote = ch;
+      start = i;
+    } else if (quote !== null && ch === quote) {
+      ranges.push([start, i + 1]);
+      quote = null;
+    }
+  }
+  if (quote !== null) ranges.push([start, line.length]);
+  return ranges;
+}
+
+function isInsideRanges(ranges: Array<[number, number]>, offset: number): boolean {
+  return ranges.some(([start, end]) => offset >= start && offset < end);
+}
+
+/**
+ * Rewrites every property chain on `line` into optional chaining with a
+ * nullish-coalesced fallback.
+ *
+ * Two correctness properties this must hold:
+ *
+ *  1. Each rewritten chain is parenthesised. `??` binds looser than `*`, `+`
+ *     and most binary operators, so an unparenthesised
+ *     `invoice?.rate ?? "Unknown City" * 2` silently becomes
+ *     `(invoice?.rate ?? "Unknown City") * 2` -- a value substitution, not a
+ *     null guard. The fallback is applied once, to the whole returned
+ *     expression, so precedence cannot be inverted.
+ *  2. Chains inside string literals are left alone.
+ */
+export function toSafeNavigation(line: string, fallback = '"Unknown City"'): string {
+  const quoted = quotedRanges(line);
+
+  const rewritten = line.replace(MEMBER_CHAIN, (chain, offset: number) => {
+    if (isInsideRanges(quoted, offset)) return chain;
+    return `(${chain.replace(/\./g, '?.')})`;
+  });
+
+  const isReturnStatement = /^\s*return\b/.test(rewritten);
+  if (!isReturnStatement) return rewritten;
+
+  // Attach the fallback to the returned expression, after the optional chaining
+  // rewrite, preserving any trailing semicolon.
+  const trimmedEnd = rewritten.replace(/\s*;\s*$/, '');
+  const semicolon = rewritten.trimEnd().endsWith(';') ? ';' : '';
+  return `${trimmedEnd} ?? ${fallback}${semicolon}`;
+}
+
+/**
+ * Parses `code` as TypeScript and returns the parser's diagnostics.
+ *
+ * Used to reject an LLM patch before it overwrites the target file. Checking
+ * only that the reply *mentions* the target function accepts prose, a diff, or
+ * a file that does not compile.
+ */
+export function parseDiagnostics(code: string): string[] {
+  const sourceFile = ts.createSourceFile(
+    'candidate.ts',
+    code,
+    ts.ScriptTarget.ES2022,
+    /* setParentNodes */ false,
+    ts.ScriptKind.TS
+  );
+  // `parseDiagnostics` is not in the public .d.ts surface, so it is read off the
+  // internal shape with a cast rather than suppressed.
+  const diagnostics = (sourceFile as unknown as { parseDiagnostics?: ts.Diagnostic[] })
+    .parseDiagnostics;
+  if (!Array.isArray(diagnostics)) return [];
+  return diagnostics
+    .slice(0, 5)
+    .map((d) => ts.flattenDiagnosticMessageText(d.messageText, ' '));
+}
+
+/** True when `code` parses as TypeScript without syntax errors. */
+export function isParsable(code: string): boolean {
+  return parseDiagnostics(code).length === 0;
 }
 
 export class PatchGenerator {
@@ -49,40 +145,48 @@ export class PatchGenerator {
     // guards the immediate receiver and misses the root-null case one level
     // further out. The reproduction test asserts the root-null case, so this
     // attempt fails for a real reason and the rollback is earned.
+    //
+    // It is chosen when the operator asks for it (`--demo-force-fault`) or when
+    // there is genuinely no caller context to learn from. When the blast radius
+    // *does* carry callers, attempt 1 gets them -- otherwise every automatic
+    // run would stage a failure it did not need to stage.
     // ==========================================
-    if (attempt === 1) {
+    const useBlindStrategy = forceFault || (blastRadius?.callers?.length ?? 0) === 0;
+
+    if (attempt === 1 && useBlindStrategy) {
       console.log(`[PatchGenerator] Generating Attempt 1 (Trace-blind: stack trace only, no caller context)...`);
 
       let naivePatch = fileContent;
-      if (offendingLine && failingProperty) {
-        // Locate the member chain that raised, e.g. invoice.customer.address.city
-        const memberRegex = new RegExp(`([a-zA-Z0-9_]+(\\.[a-zA-Z0-9_]+)*\\.${failingProperty}(\\.[a-zA-Z0-9_]+)?)`, 'g');
-        const match = offendingLine.match(memberRegex);
+      // The failing property name comes from an error message, i.e. from
+      // untrusted input. Escape it before interpolating into a RegExp.
+      const escapedProperty = failingProperty.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      // Locate the member chain that raised, e.g. invoice.customer.address.city
+      const memberRegex = escapedProperty
+        ? new RegExp(`([A-Za-z_$][A-Za-z0-9_$]*(?:\\.[A-Za-z_$][A-Za-z0-9_$]*)*\\.${escapedProperty}(?:\\.[A-Za-z_$][A-Za-z0-9_$]*)?)`, 'g')
+        : null;
+      const match = memberRegex ? offendingLine.match(memberRegex) : null;
 
-        if (match && match[0]) {
-          const chain = match[0];
-          const lastDot = chain.lastIndexOf('.');
-          const receiver = chain.substring(0, lastDot);
-          const remainder = chain.substring(lastDot);
-          // Trace-blind fix: guard the immediate receiver only. When the object
-          // that actually raised is one level FURTHER out (invoice itself is
-          // undefined), this guard does not help -- which is the real blind
-          // spot, not a deliberately planted bug.
-          const naiveLine = offendingLine.replace(chain, `(${receiver} ? ${receiver}${remainder} : "Unknown")`);
-          const patchLines = [...lines];
-          patchLines[targetLineIdx] = `  // Trace-blind patch: guards only the immediate receiver\n${naiveLine}`;
-          naivePatch = patchLines.join('\n');
-        } else {
-          naivePatch = fileContent.replace(
-            'return invoice.customer.address.city;',
-            '// Trace-blind patch: no caller context available\n  return invoice.customer ? invoice.customer.address.city : "Unknown";'
-          );
-        }
-      } else {
-        naivePatch = fileContent.replace(
-          'return invoice.customer.address.city;',
-          '// Trace-blind patch: no caller context available\n  return invoice.customer ? invoice.customer.address.city : "Unknown";'
-        );
+      if (match && match[0]) {
+        const chain = match[0];
+        const lastDot = chain.lastIndexOf('.');
+        const receiver = chain.substring(0, lastDot);
+        const remainder = chain.substring(lastDot);
+        // Trace-blind fix: guard the immediate receiver only. When the object
+        // that actually raised is one level FURTHER out (invoice itself is
+        // undefined), this guard does not help -- which is the real blind
+        // spot, not a deliberately planted bug.
+        const naiveLine = offendingLine.replace(chain, `(${receiver} ? ${receiver}${remainder} : "Unknown")`);
+        const patchLines = [...lines];
+        patchLines[targetLineIdx] = `  // Trace-blind patch: guards only the immediate receiver\n${naiveLine}`;
+        naivePatch = patchLines.join('\n');
+      } else if (offendingLine && targetLineIdx >= 0) {
+        // No chain matched the reported property. Guard the whole offending
+        // statement generically rather than substituting a hardcoded literal
+        // from one specific demo file.
+        const patchLines = [...lines];
+        patchLines[targetLineIdx] =
+          `  // Trace-blind patch: no caller context available\n${toSafeNavigation(offendingLine, '"Unknown"')}`;
+        naivePatch = patchLines.join('\n');
       }
 
       const promptLength = (span.errorMessage + offendingLine).length;
@@ -96,14 +200,6 @@ export class PatchGenerator {
         tokenCount,
         costUSD
       };
-    }
-
-    // `--demo-force-fault` forces the trace-blind strategy so the bounded
-    // retry / rollback path can be demonstrated on demand. It is an explicit
-    // operator flag, not something the agent does by itself.
-    if (forceFault) {
-      console.log(`[PatchGenerator] Force-fault requested: applying the trace-blind strategy...`);
-      return PatchGenerator.generatePatch(filePath, span, blastRadius, 1, false);
     }
 
     // ==========================================
@@ -145,7 +241,17 @@ export class PatchGenerator {
           let rawFix = json.choices?.[0]?.message?.content?.trim();
           if (rawFix) {
             rawFix = rawFix.replace(/^```[a-zA-Z]*\n?/, '').replace(/\n?```$/, '').trim();
-            if (rawFix.includes('processInvoice') || rawFix.includes(blastRadius.targetFunction)) {
+            // A reply that merely mentions the target function can still be
+            // prose, a diff, or a file that does not compile -- and this code
+            // is about to overwrite the target. Require that it parses as
+            // TypeScript before it is accepted.
+            const syntaxErrors = parseDiagnostics(rawFix);
+            if (syntaxErrors.length > 0) {
+              console.warn(
+                `[PatchGenerator] Rejected LLM patch for ${filePath}: does not parse ` +
+                  `(${syntaxErrors[0]}). Falling back to the AST-guided transformer.`
+              );
+            } else if (rawFix.includes(blastRadius.targetFunction)) {
               const usage = json.usage || {};
               const totalTokens = usage.total_tokens || Math.ceil((promptUser.length + rawFix.length) / 4);
               const cost = Number(((totalTokens / 1_000_000) * 0.30).toFixed(6));
@@ -169,42 +275,22 @@ export class PatchGenerator {
     let robustPatch = fileContent;
 
     if (offendingLine && targetLineIdx >= 0) {
-      // Find property access expressions like a.b.c or invoice.customer.address.city
-      const memberRegex = /([a-zA-Z0-9_]+(?:\.[a-zA-Z0-9_]+)+)/g;
-      const matches = offendingLine.match(memberRegex);
-
-      if (matches && matches.length > 0) {
-        let transformedLine = offendingLine;
-        for (const chain of matches) {
-          // Transform deep property chain into optional chaining: a.b.c -> a?.b?.c
-          const safeChain = chain.replace(/\./g, '?.');
-          // Add nullish coalescing fallback if statement returns or assigns a value
-          const safeExpr = transformedLine.includes('return ')
-            ? `${safeChain} ?? "Unknown City"`
-            : safeChain;
-          transformedLine = transformedLine.replace(chain, safeExpr);
-        }
-
-        const patchLines = [...lines];
-        patchLines[targetLineIdx] = `  // SutureLoop Verified Patch: AST-guided safe navigation with fallback\n${transformedLine}`;
-        robustPatch = patchLines.join('\n');
-      } else if (offendingLine && targetLineIdx >= 0) {
-        // No member chain matched (e.g. a computed access). Fall back to a
-        // safe-navigation rewrite of the whole statement rather than a
-        // hardcoded source literal, so this path is not tied to one file.
-        const patchLines = [...lines];
-        patchLines[targetLineIdx] = `  // SutureLoop Verified Patch: AST-guided safe navigation with fallback\n${offendingLine.replace(/\./g, '?.').replace(/(\?\.[a-zA-Z0-9_]+)/, '$1 ?? "Unknown City"')}`;
-        robustPatch = patchLines.join('\n');
+      // Already null-guarded: rewriting `a?.b` again would produce nonsense.
+      if (offendingLine.includes('?.')) {
+        robustPatch = fileContent;
       } else {
-        robustPatch = robustPatch.replace(
-          'return invoice.customer.address.city;',
-          '// SutureLoop Verified Patch: AST-guided safe navigation with fallback\n  return invoice?.customer?.address?.city ?? "Unknown City";'
-        );
+        const patchLines = [...lines];
+        patchLines[targetLineIdx] =
+          `  // SutureLoop Verified Patch: AST-guided safe navigation with fallback\n${toSafeNavigation(offendingLine)}`;
+        robustPatch = patchLines.join('\n');
       }
-    } else {
-      robustPatch = robustPatch.replace(
-        'return invoice.customer.address.city;',
-        '// SutureLoop Verified Patch: AST-guided safe navigation with fallback\n  return invoice?.customer?.address?.city ?? "Unknown City";'
+    }
+
+    // Never hand a syntactically broken file to the test runner: the failure
+    // would be attributed to the remediation rather than to the bug.
+    if (robustPatch !== fileContent && !isParsable(robustPatch)) {
+      throw new PatchSynthesisFailed(
+        `AST-guided patch for ${filePath} did not produce parsable TypeScript; refusing to write it.`
       );
     }
 

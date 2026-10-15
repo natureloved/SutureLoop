@@ -1,20 +1,73 @@
 import { TelemetryService } from '../telemetry/neatlogs_client.js';
-import { withHealingTrace, shutdownTracing } from '../telemetry/session_tracer.js';
+import { withHealingTrace, stageSpan, shutdownTracing } from '../telemetry/session_tracer.js';
 import { CheckpointManager } from '../state/checkpoint_manager.js';
-import { GitSandbox } from '../state/git_sandbox.js';
 import { analyzeBlastRadius } from '../context/blast_radius.js';
 import { RetryController } from '../synthesis/retry_controller.js';
-import { calculateIncidentEconomics, generateBusinessModel } from '../economics/unit_economics.js';
+import { calculateIncidentEconomics } from '../economics/unit_economics.js';
 import { FailureSpan, SelfHealingSessionResult } from './types.js';
 import { InvariantViolationError } from './errors.js';
+import { Mutex } from './mutex.js';
 import { assertValidTargetFile, assertMeasuredMetric, assertCleanWorktree } from './invariants.js';
 import { GitHubPRClient } from '../github/pr_client.js';
 import { config } from '../config/env.js';
+import * as fs from 'fs';
+import * as path from 'path';
+
+/**
+ * Where the last measured run is recorded.
+ *
+ * `sutureloop model` used to print a hardcoded `$0.0007` "measured" cost that
+ * never came from a run. The number is now written here by every completed
+ * session and read back by that command, so the financial model is anchored to
+ * a real measurement or says it has none.
+ */
+function measuredRunFile(): string {
+  return path.resolve(process.cwd(), '.git', 'sutureloop', 'last-run.json');
+}
+
+export function persistMeasuredRun(run: {
+  sessionId: string;
+  measuredTokenCostUSD: number;
+  durationMs: number;
+}): void {
+  const file = measuredRunFile();
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(
+      file,
+      JSON.stringify({ ...run, recordedAt: Date.now() }, null, 2),
+      'utf-8'
+    );
+  } catch (err: any) {
+    console.warn(`[SutureLoop] Could not persist measured run metrics: ${err.message}`);
+  }
+}
+
+export function readMeasuredRun(): { sessionId: string; measuredTokenCostUSD: number; durationMs: number; recordedAt: number } | null {
+  const file = measuredRunFile();
+  try {
+    if (!fs.existsSync(file)) return null;
+    return JSON.parse(fs.readFileSync(file, 'utf-8'));
+  } catch {
+    return null;
+  }
+}
 
 export class SutureLoopOrchestrator {
   private telemetry: TelemetryService;
   private checkpointManager: CheckpointManager;
   private retryController: RetryController;
+
+  /**
+   * One remediation at a time.
+   *
+   * The CLI, watch mode and the server's `/api/v1/incidents/ingest` webhook can
+   * all start sessions, and the webhook deliberately does not block its
+   * response. Without this lock two sessions would snapshot, rewrite and roll
+   * back the same file at once -- clobbering each other's checkpoints and
+   * attributing a failing test to the wrong patch.
+   */
+  private sessionMutex = new Mutex();
 
   constructor() {
     this.telemetry = new TelemetryService(config.neatlogsApiKey, config.traceUrlTemplate);
@@ -23,6 +76,13 @@ export class SutureLoopOrchestrator {
   }
 
   async run(customSpan?: FailureSpan, forceFault = false): Promise<SelfHealingSessionResult> {
+    if (this.sessionMutex.pending) {
+      console.log('[SutureLoop] Another remediation session is in progress; queueing this one.');
+    }
+    return this.sessionMutex.runExclusive(() => this.runExclusiveSession(customSpan, forceFault));
+  }
+
+  private async runExclusiveSession(customSpan?: FailureSpan, forceFault = false): Promise<SelfHealingSessionResult> {
     const startTime = Date.now();
     const sessionId = `suture_${Date.now()}`;
 
@@ -93,7 +153,7 @@ export class SutureLoopOrchestrator {
 
     // 3. Resolve AST Blast Radius using Entire Graph
     console.log(`\n[Step 3] Analyzing AST Blast Radius with Entire Graph...`);
-    const impact = await analyzeBlastRadius(targetFile, targetLine);
+    const impact = await (await stageSpan('resolve-blast-radius', 'CHAIN', analyzeBlastRadius))(targetFile, targetLine);
     console.log(`  ✓ Target Function : ${impact.report.targetFunction}`);
     console.log(`  ✓ Direct Callers  : ${impact.report.callers.length}`);
     impact.report.callers.forEach((c) => {
@@ -109,13 +169,17 @@ export class SutureLoopOrchestrator {
 
     // 4. Save Base Checkpoint & Execute Bounded Healing Loop
     console.log(`\n[Step 4] Starting Bounded Retry & Rollback Loop...`);
-    const loopResult = await this.retryController.executeHealingLoop(
-      targetFile,
-      span,
-      impact.report,
-      forceFault,
-      config.retryLimit
-    );
+    const loopResult = await (
+      await stageSpan('healing-loop', 'AGENT', () =>
+        this.retryController.executeHealingLoop(
+          targetFile,
+          span,
+          impact.report,
+          forceFault,
+          config.retryLimit
+        )
+      )
+    )();
 
     // 5. Run Comparative Trace Evaluation
     console.log(`\n[Step 5] Running Comparative Trace Evaluation...`);
@@ -144,11 +208,15 @@ export class SutureLoopOrchestrator {
       }
     }
 
-    const evalResult = await this.telemetry.runComparativeEval(
-      span.traceId,
-      healedTraceId || `trace_unverified_${Date.now()}`,
-      liveReplaySucceeded
-    );
+    const evalResult = await (
+      await stageSpan('comparative-eval', 'EVALUATOR', () =>
+        this.telemetry.runComparativeEval(
+          span.traceId,
+          healedTraceId || `trace_unverified_${Date.now()}`,
+          liveReplaySucceeded
+        )
+      )
+    )();
     console.log(`  ✓ Evaluation Mode : ${evalResult.mode}`);
     console.log(`  ✓ Baseline Trace  : ${evalResult.baselineTraceUrl}`);
     console.log(`  ✓ Healed Trace    : ${evalResult.healedTraceUrl}`);
@@ -170,10 +238,18 @@ export class SutureLoopOrchestrator {
     });
 
     console.log(`  ✓ Measured Token Cost    : $${econ.measuredTokenCostUSD}`);
-    console.log(`  ✓ MTTR Hours Saved       : ${econ.mttrHoursSaved} hrs`);
+    console.log(`  ✓ MTTR Hours Saved       : $${econ.mttrHoursSaved} hrs`);
     console.log(`  ✓ Gross Value Created    : $${econ.grossSavingsUSD}`);
     console.log(`  ✓ Net Value per Incident : $${econ.netSavingsUSD}`);
-    console.log(`  ✓ Gross Margin           : ${econ.grossMarginPercent}%`);
+    console.log(`  ✓ Gross Margin           : $${econ.grossMarginPercent}%`);
+
+    // Persist this run's measured figures so `sutureloop model` reports what
+    // was actually measured instead of a hardcoded constant.
+    persistMeasuredRun({
+      sessionId,
+      measuredTokenCostUSD: econ.measuredTokenCostUSD,
+      durationMs: Date.now() - startTime
+    });
 
     // 7. Automated Production Pull Request (if enabled / GITHUB_TOKEN set)
     if (loopResult.success) {
@@ -206,7 +282,7 @@ export class SutureLoopOrchestrator {
       targetFile,
       targetFunction: impact.report.targetFunction,
       blastRadius: impact.report,
-      checkpointId: 'cp_latest',
+      checkpointId: loopResult.checkpointId,
       attempts: loopResult.attempts,
       evalResult,
       economicMetrics: econ,

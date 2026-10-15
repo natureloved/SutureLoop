@@ -49,14 +49,23 @@ export interface ComparativeEvalResult {
   deltaErrors?: number;
   durationMs?: number;
   tokenCostUSD?: number;
-  status: 'VERIFIED_PASS' | 'REGRESSION_DETECTED' | 'MANUAL_VERIFICATION_REQUIRED';
+  /**
+   * `VERIFIED_PASS`      - clean healed trace AND a confirmed live replay.
+   * `REGRESSION_DETECTED`- the healed trace recorded errors.
+   * `VERIFICATION_INCOMPLETE` - the healed trace is clean but no live replay was
+   *   confirmed. Distinct from a regression: nothing broke, the evidence is
+   *   just insufficient, which is the normal result of a CLI `auto-heal` run
+   *   with no service listening.
+   * `MANUAL_VERIFICATION_REQUIRED` - not enough telemetry to decide at all.
+   */
+  status: 'VERIFIED_PASS' | 'REGRESSION_DETECTED' | 'VERIFICATION_INCOMPLETE' | 'MANUAL_VERIFICATION_REQUIRED';
   note?: string;
   error?: string;
   /**
    * Which layer actually produced this verdict. Reported so the demo never
    * claims a stronger verification than it performed.
    */
-  verifiedBy?: 'local-spans' | 'local-spans+live-replay' | 'neatlogs-cli' | 'dashboard-manual';
+  verifiedBy?: 'local-spans' | 'local-spans+live-replay' | 'neatlogs-cli' | 'neatlogs-cli+live-replay' | 'dashboard-manual';
 }
 
 export interface PatchAttemptResult {

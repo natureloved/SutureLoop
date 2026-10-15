@@ -13,6 +13,13 @@ export interface SutureLoopMiddlewareOptions {
 export function sutureLoopMiddleware(options: SutureLoopMiddlewareOptions) {
   const ingestUrl = options.sutureLoopIngestUrl || process.env.SUTURELOOP_INGEST_URL || 'http://localhost:3000/api/v1/incidents/ingest';
 
+  // The ingest endpoint requires `x-sutureloop-secret` (or a Bearer token)
+  // whenever a secret is configured. This middleware used to send only
+  // Content-Type and never checked the response status, so the first time an
+  // operator set a secret every forwarded crash was rejected with 401 and the
+  // middleware reported nothing -- telemetry simply stopped arriving.
+  const configuredSecret = process.env.SUTURELOOP_WEBHOOK_SECRET || process.env.API_SECRET;
+
   return (err: any, req: Request, _res: Response, next: NextFunction) => {
     const traceId = `trace_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
 
@@ -39,14 +46,27 @@ export function sutureLoopMiddleware(options: SutureLoopMiddlewareOptions) {
       timestamp: Date.now()
     };
 
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (configuredSecret) {
+      headers['x-sutureloop-secret'] = configuredSecret;
+    }
+
     // Asynchronously notify SutureLoop ingestion endpoint without blocking client error response
     fetch(ingestUrl, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify(payload)
-    }).catch(postErr => {
-      console.warn(`[SutureLoop Middleware] Could not reach ingest endpoint ${ingestUrl}: ${postErr.message}`);
-    });
+    })
+      .then(async (res) => {
+        if (res.ok) return;
+        const detail = await res.text().catch(() => '');
+        console.warn(
+          `[SutureLoop Middleware] Ingest endpoint rejected ${traceId}: HTTP ${res.status} ${detail}`
+        );
+      })
+      .catch(postErr => {
+        console.warn(`[SutureLoop Middleware] Could not reach ingest endpoint ${ingestUrl}: ${postErr.message}`);
+      });
 
     next(err);
   };

@@ -4,6 +4,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { CheckpointFailed } from '../core/errors.js';
 import { CheckpointInfo } from '../core/types.js';
+import { recordAppliedPatch, clearAppliedPatch } from './applied_patches.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -99,20 +100,31 @@ export class CheckpointManager {
     this.checkpoints.delete(id);
   }
 
+  /**
+   * Removes the checkpoints this process created -- and only those.
+   *
+   * An earlier version additionally swept every branch matching `cp_*` and force
+   * deleted it, which meant a developer's own `cp-hotfix` branch was destroyed
+   * on the first successful heal. Branch deletion is scoped to `activeBranches`
+   * now; nothing here enumerates or removes refs the agent did not mint.
+   */
   async pruneAll(): Promise<void> {
     for (const id of Array.from(this.activeBranches)) {
       await this.cleanup(id);
     }
-    // Also delete any dangling cp_* branches in git
-    try {
-      const { stdout } = await execFileAsync('git', ['branch', '--list', 'cp_*']);
-      const branches = stdout.split('\n').map(b => b.trim().replace(/^\*\s*/, '')).filter(Boolean);
-      for (const b of branches) {
-        try {
-          await execFileAsync('git', ['branch', '-D', b]);
-        } catch {}
-      }
-    } catch {}
+  }
+
+  /**
+   * Records that the agent wrote `content` into the target and left it
+   * uncommitted, so the safety gate in `assertCleanWorktree` can tell an
+   * agent-authored patch apart from a developer's in-progress work.
+   */
+  recordAppliedPatch(filePath: string, content: string, sessionId?: string): void {
+    recordAppliedPatch(filePath, content, sessionId);
+  }
+
+  clearAppliedPatch(filePath: string): void {
+    clearAppliedPatch(filePath);
   }
 
   async isTreePristine(targetFile?: string): Promise<boolean> {

@@ -1,4 +1,4 @@
-import { TraceFetchFailed } from '../core/errors.js';
+import { Mutex } from '../core/mutex.js';
 import { FailureSpan, ComparativeEvalResult } from '../core/types.js';
 import { TraceInterceptor } from './trace_interceptor.js';
 import * as fs from 'fs';
@@ -7,6 +7,9 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 
 const execFileAsync = promisify(execFile);
+
+/** Oldest spans past this count are dropped, so the queue file cannot grow forever. */
+const MAX_QUEUED_SPANS = 500;
 
 /**
  * neatlogs integration for SutureLoop.
@@ -42,6 +45,12 @@ export class TelemetryService {
   private traceUrlTemplate: string;
   private apiKey?: string;
   private localTelemetryQueueFile: string;
+  /**
+   * Serialises queue mutations. The file is rewritten by read-append-write, so
+   * two concurrent writers -- the demo server recording a span while the
+   * ingest webhook starts a remediation -- would otherwise lose spans.
+   */
+  private queueMutex = new Mutex();
 
   constructor(apiKey?: string, traceUrlTemplate?: string) {
     this.apiKey = apiKey || process.env.NEATLOGS_API_KEY;
@@ -54,20 +63,30 @@ export class TelemetryService {
     return Boolean(this.apiKey);
   }
 
+  private readQueue(): FailureSpan[] {
+    if (!fs.existsSync(this.localTelemetryQueueFile)) return [];
+    try {
+      const parsed = JSON.parse(fs.readFileSync(this.localTelemetryQueueFile, 'utf-8'));
+      return Array.isArray(parsed) ? (parsed as FailureSpan[]) : [];
+    } catch {
+      return [];
+    }
+  }
+
   /**
    * Records an error span to the local telemetry queue (used by the instrumented demo server).
    */
   async recordLocalFailureSpan(span: FailureSpan): Promise<void> {
-    let existing: FailureSpan[] = [];
-    if (fs.existsSync(this.localTelemetryQueueFile)) {
-      try {
-        existing = JSON.parse(fs.readFileSync(this.localTelemetryQueueFile, 'utf-8'));
-      } catch {
-        existing = [];
-      }
-    }
-    existing.push(span);
-    fs.writeFileSync(this.localTelemetryQueueFile, JSON.stringify(existing, null, 2), 'utf-8');
+    await this.queueMutex.runExclusive(() => {
+      const existing = this.readQueue();
+      existing.push(span);
+      // Bounded queue: a long-running watch session would otherwise grow this
+      // file without limit, and every read re-parses all of it.
+      const trimmed = existing.length > MAX_QUEUED_SPANS
+        ? existing.slice(existing.length - MAX_QUEUED_SPANS)
+        : existing;
+      fs.writeFileSync(this.localTelemetryQueueFile, JSON.stringify(trimmed, null, 2), 'utf-8');
+    });
   }
 
   /**
@@ -79,24 +98,16 @@ export class TelemetryService {
    * this method is the local, offline-verifiable view of the same stream.
    */
   async getLatestFailureSpan(): Promise<FailureSpan | null> {
-    if (fs.existsSync(this.localTelemetryQueueFile)) {
-      try {
-        const fileContent = fs.readFileSync(this.localTelemetryQueueFile, 'utf-8');
-        const spans: FailureSpan[] = JSON.parse(fileContent);
-        for (let i = spans.length - 1; i >= 0; i--) {
-          const s = spans[i];
-          const hasError = Boolean(s.errorMessage && s.errorMessage.trim().length > 0);
-          if (hasError && !this.seenTraceIds.has(s.traceId)) {
-            this.seenTraceIds.add(s.traceId);
-            this.lastPolledTimestamp = Date.now();
-            return TraceInterceptor.extractFailureContext(s);
-          }
-        }
-      } catch (err: any) {
-        throw new TraceFetchFailed(`Failed to read local telemetry queue: ${err.message}`);
+    const spans = this.readQueue();
+    for (let i = spans.length - 1; i >= 0; i--) {
+      const s = spans[i];
+      const hasError = Boolean(s.errorMessage && s.errorMessage.trim().length > 0);
+      if (hasError && !this.seenTraceIds.has(s.traceId)) {
+        this.seenTraceIds.add(s.traceId);
+        this.lastPolledTimestamp = Date.now();
+        return TraceInterceptor.extractFailureContext(s);
       }
     }
-
     return null;
   }
 
@@ -106,6 +117,12 @@ export class TelemetryService {
    * `liveReplaySucceeded` is the orchestrator's confirmation that the healed
    * code actually served the originally-failing request with a 2xx. A clean
    * healed span alone is not proof of a fix; both are required for VERIFIED_PASS.
+   *
+   * A clean healed span *without* a live replay is reported as
+   * VERIFICATION_INCOMPLETE, not REGRESSION_DETECTED -- nothing regressed, the
+   * evidence is simply insufficient, and conflating the two makes a successful
+   * heal look like a failed one every time the service is not running (which is
+   * every CLI `auto-heal` invocation).
    */
   async runComparativeEval(
     baselineTraceId: string,
@@ -123,37 +140,43 @@ export class TelemetryService {
     const baselineUrl = formatUrl(baselineTraceId);
     const healedUrl = formatUrl(healedTraceId);
 
-    // Layer 1: local recorded spans. Both traces must be present for a verdict.
-    if (fs.existsSync(this.localTelemetryQueueFile)) {
-      try {
-        const spans: FailureSpan[] = JSON.parse(
-          fs.readFileSync(this.localTelemetryQueueFile, 'utf-8')
-        );
-        const baselineSpan = spans.find((s) => s.traceId === baselineTraceId);
-        const healedSpan = spans.find((s) => s.traceId === healedTraceId);
+    const countErrors = (spans: FailureSpan[], traceId: string): number =>
+      spans.filter((s) => s.traceId === traceId && s.errorMessage && s.errorMessage.trim().length > 0).length;
 
-        if (baselineSpan && healedSpan) {
-          const baselineErrors = 1;
-          const healedErrors = healedSpan.errorMessage ? 1 : 0;
-          const verifiedPass = healedErrors === 0 && liveReplaySucceeded;
-          return {
-            mode: 'PROGRAMMATIC_EVAL',
-            baselineTraceId,
-            healedTraceId,
-            baselineTraceUrl: baselineUrl,
-            healedTraceUrl: healedUrl,
-            baselineErrors,
-            healedErrors,
-            deltaErrors: baselineErrors - healedErrors,
-            status: verifiedPass ? 'VERIFIED_PASS' : 'REGRESSION_DETECTED',
-            note: liveReplaySucceeded
+    const verdict = (healedErrors: number): ComparativeEvalResult['status'] => {
+      if (healedErrors > 0) return 'REGRESSION_DETECTED';
+      return liveReplaySucceeded ? 'VERIFIED_PASS' : 'VERIFICATION_INCOMPLETE';
+    };
+
+    // Layer 1: local recorded spans. Both traces must be present for a verdict.
+    const spans = this.readQueue();
+    if (spans.length > 0) {
+      const baselineSpan = spans.find((s) => s.traceId === baselineTraceId);
+      const healedSpan = spans.find((s) => s.traceId === healedTraceId);
+
+      if (baselineSpan && healedSpan) {
+        // Counted from the recorded spans, not asserted as 1.
+        const baselineErrors = countErrors(spans, baselineTraceId);
+        const healedErrors = countErrors(spans, healedTraceId);
+        const status = verdict(healedErrors);
+        return {
+          mode: 'PROGRAMMATIC_EVAL',
+          baselineTraceId,
+          healedTraceId,
+          baselineTraceUrl: baselineUrl,
+          healedTraceUrl: healedUrl,
+          baselineErrors,
+          healedErrors,
+          deltaErrors: baselineErrors - healedErrors,
+          status,
+          note:
+            status === 'VERIFIED_PASS'
               ? 'Verified from local instrumented telemetry plus a live replayed request.'
-              : 'Healed span is clean but the live replay was not confirmed.',
-            verifiedBy: liveReplaySucceeded ? 'local-spans+live-replay' : 'local-spans'
-          };
-        }
-      } catch {
-        // Fall through to the honest fallback below.
+              : status === 'REGRESSION_DETECTED'
+                ? 'The healed trace recorded errors.'
+                : 'Healed span is clean but the live replay was not confirmed, so the verdict is incomplete rather than a pass.',
+          verifiedBy: liveReplaySucceeded ? 'local-spans+live-replay' : 'local-spans'
+        };
       }
     }
 
@@ -167,6 +190,9 @@ export class TelemetryService {
         if (bData && hData) {
           const bErr = bData.status === 'ERROR' ? 1 : 0;
           const hErr = hData.status === 'ERROR' ? 1 : 0;
+          // Same rule as layer 1: a clean cloud trace without a live replay is
+          // incomplete, not a pass.
+          const status = verdict(hErr);
           return {
             mode: 'PROGRAMMATIC_EVAL',
             baselineTraceId,
@@ -177,9 +203,14 @@ export class TelemetryService {
             healedErrors: hErr,
             deltaErrors: bErr - hErr,
             durationMs: hData.durationMs,
-            status: hErr === 0 ? 'VERIFIED_PASS' : 'REGRESSION_DETECTED',
-            note: 'Verified from Neatlogs cloud readback via neatlogs-cli.',
-            verifiedBy: 'neatlogs-cli'
+            status,
+            note:
+              status === 'VERIFIED_PASS'
+                ? 'Verified from Neatlogs cloud readback via neatlogs-cli plus a live replay.'
+                : status === 'REGRESSION_DETECTED'
+                  ? 'Neatlogs cloud readback shows the healed trace in an ERROR state.'
+                  : 'Neatlogs cloud readback is clean but the live replay was not confirmed.',
+            verifiedBy: liveReplaySucceeded ? 'neatlogs-cli+live-replay' : 'neatlogs-cli'
           };
         }
       } catch (err: any) {

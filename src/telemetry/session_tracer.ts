@@ -39,7 +39,13 @@ interface NeatlogsModule {
 }
 
 let modulePromise: Promise<NeatlogsModule | null> | null = null;
-let initialized = false;
+/**
+ * The key the SDK was initialised with. `neatlogs.init` is process-global and
+ * was previously called only once, so a process whose first run had no API key
+ * stayed pinned to `disableExport: true` and silently dropped telemetry for
+ * every later run, even after a key became available.
+ */
+let initializedWithKey: string | null | undefined;
 
 /** Lazily import the neatlogs SDK. Returns null when it is not installed. */
 function loadSdk(): Promise<NeatlogsModule | null> {
@@ -89,16 +95,18 @@ export async function withHealingTrace<T>(
     return fn();
   }
 
-  if (!initialized) {
-    initialized = true;
+  const apiKey = options.apiKey ?? process.env.NEATLOGS_API_KEY ?? null;
+  if (initializedWithKey !== apiKey) {
     try {
       await sdk.init({
-        apiKey: options.apiKey,
+        apiKey: apiKey ?? undefined,
         workflowName: 'sutureloop-autonomous-healer',
         // Without a key, keep spans local so the demo never silently uploads.
-        disableExport: !options.apiKey
+        disableExport: !apiKey
       });
+      initializedWithKey = apiKey;
     } catch (err: any) {
+      // Leave initializedWithKey unset so the next run retries init.
       console.warn(`[Neatlogs] init() failed (${err?.message || err}); continuing without cloud export.`);
     }
   }

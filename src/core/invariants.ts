@@ -2,6 +2,7 @@ import { InvariantViolationError } from './errors.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import { execFileSync } from 'child_process';
+import { isAgentAuthored } from '../state/applied_patches.js';
 
 /**
  * Ensures the file the agent is about to mutate carries no uncommitted work.
@@ -17,10 +18,21 @@ import { execFileSync } from 'child_process';
  * copy. Self-mutation of the agent's own source is already blocked by
  * `assertValidTargetFile`.
  *
+ * One exemption: a file whose current bytes are exactly what SutureLoop itself
+ * wrote in a previous successful heal (see `state/applied_patches.ts`). The
+ * patch is the agent's own output, so rolling it back destroys nothing of the
+ * developer's. Without this, watch mode heals one incident and then refuses
+ * every later one. The exemption is content-addressed and dies the moment
+ * anyone edits on top of the patch.
+ *
  * @param targetFile - the file that will be mutated and rolled back
  */
 export function assertCleanWorktree(targetFile?: string): void {
   if (!targetFile) {
+    return;
+  }
+
+  if (isAgentAuthored(targetFile)) {
     return;
   }
 
@@ -48,7 +60,7 @@ export function assertCleanWorktree(targetFile?: string): void {
  * Validates that the target file exists, is inside the allowed application boundary,
  * and strictly prevents self-mutation of the agent's own core code or configuration.
  */
-export function assertValidTargetFile(filePath: string, allowedPrefixes = ['demo/service', 'demo']): void {
+export function assertValidTargetFile(filePath: string, allowedPrefixes = ['demo']): void {
   if (!filePath || filePath.trim() === '') {
     throw new InvariantViolationError('Target file path cannot be empty.');
   }
@@ -102,8 +114,16 @@ export function assertValidTargetFile(filePath: string, allowedPrefixes = ['demo
     throw new InvariantViolationError(`Security boundary violation: Cannot target root workspace files: ${filePath}`);
   }
 
-  // Ensure target is within designated application boundary
-  const isAllowed = allowedPrefixes.some(prefix => normalizedRel.startsWith(prefix));
+  // Ensure target is within designated application boundary.
+  // Matched on whole path segments: a bare `startsWith(prefix)` would also admit
+  // a sibling directory such as `demo-secrets/` when the prefix is `demo`.
+  const isAllowed = allowedPrefixes.some(prefix => {
+    const normalizedPrefix = prefix.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+    return (
+      normalizedRel === normalizedPrefix ||
+      normalizedRel.startsWith(`${normalizedPrefix}/`)
+    );
+  });
   if (!isAllowed) {
     throw new InvariantViolationError(
       `Target file '${filePath}' is not within permitted remediation application roots: [${allowedPrefixes.join(', ')}]`
